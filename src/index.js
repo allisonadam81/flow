@@ -48,7 +48,7 @@ export const isBool = (b) => typeof b === "boolean";
 export const isFunction = (f) => typeof f === "function";
 export const isNull = (n) => n === null;
 export const isUndefined = (u) => u === undefined;
-export const isArray = (a) => Array.isArray(a);
+export const isArray = Array.isArray;
 export const isNullOrUnd = (v) => isNull(v) || isUndefined(v);
 
 export const toArray = (collection) => {
