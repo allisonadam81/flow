@@ -5,9 +5,9 @@ class Task {
 
   static of = (fn) => new Task(fn);
 
-  map = (fn) => Task.of(async () => fn(this.work()));
+  map = (fn) => Task.of(async () => fn(await this.work()));
 
-  flatMap = (fn) => async () => fn(this.work());
+  flatMap = (fn) => async () => fn(await this.work());
 
   catch = (fn) =>
     Task.of(async () => {
