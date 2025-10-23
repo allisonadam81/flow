@@ -1,20 +1,7 @@
 {
-  "name": "@allisonadam81/flow",
-  "version": "1.0.0",
-  "description": "Minimalist functional programming utilities.",
-  "homepage": "https://github.com/allisonadam81/flow#readme",
-  "bugs": {
-    "url": "https://github.com/allisonadam81/flow/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/allisonadam81/flow.git"
-  },
-  "license": "MIT",
-  "author": "Adam Allison",
-  "type": "module",
-  "main": "index.js",
-  "scripts": {
-    "test": "test"
-  }
+  "private": true,
+  "workspaces": [
+    "flow/*",
+    "example/*"
+  ]
 }
