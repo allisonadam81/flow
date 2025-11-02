@@ -5,7 +5,7 @@ class Maybe {
 
   static of = (v) => new Maybe(v);
   static nothing = () => Maybe.of(null);
-  
+
   get isNothing() {
     return this.val === null || this.val === undefined;
   }
@@ -17,6 +17,14 @@ class Maybe {
   filter = (predicate) => {
     if (this.isNothing) return this;
     return predicate(this.val) ? this : Maybe.nothing();
+  };
+
+  sequence = () => {
+    if (this.isNothing) return this;
+    return this.val.map((item) => {
+      if (item instanceof Maybe) return item;
+      return Maybe.of(item);
+    });
   };
 
   flatMap = (fn) => {
@@ -37,7 +45,7 @@ class Maybe {
   };
 
   inspect = (label) => {
-    const lbl = label ?? "Maybe log --> ";
+    const lbl = label ?? 'Maybe log --> ';
     console.log(lbl, this.val);
     return this;
   };

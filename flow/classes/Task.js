@@ -10,6 +10,12 @@ class Task {
 
   map = (fn) => Task.of(async () => fn(await this.work()));
 
+  sequence = () =>
+    Task.of(async () => {
+      const res = await this.work();
+      return res.map((v) => Task.of(v));
+    });
+
   flatMap = (fn) =>
     Task.of(async () => {
       const nextTask = fn(await this.work());
