@@ -15,6 +15,7 @@ export const isNull = (n) => n === null;
 export const isUndefined = (u) => u === undefined;
 export const isArray = Array.isArray;
 export const isNullOrUnd = (v) => isNull(v) || isUndefined(v);
+export const isPromise = (v) => v instanceof Promise;
 
 export const toArray = (collection) => {
   if (collection?.values) return [...collection.values()];
