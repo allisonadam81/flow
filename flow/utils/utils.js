@@ -20,10 +20,9 @@ export const isPromise = (v) => v instanceof Promise;
 export const toArray = (collection) => {
   if (collection?.values) return [...collection.values()];
   if (collection?.[Symbol.iterator]) return [...collection];
-  if (isNumber(collection)) return [collection];
-  if (isBool(collection)) return [collection];
   if (!collection) return [];
-  return Object.values(collection);
+  if (collection?.constructor === Object) return Object.values(collection);
+  return [collection];
 };
 
 export const defer = (fn, delay = 0, args) => setTimeout(fn, delay, args);

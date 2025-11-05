@@ -1,13 +1,21 @@
-class SmartBox {
+export const toArray = (collection) => {
+  if (collection?.values) return [...collection.values()];
+  if (collection?.[Symbol.iterator]) return [...collection];
+  if (!collection) return [];
+  if (collection?.constructor === Object) return Object.values(collection);
+  return [collection];
+};
+
+class FlowBox {
   constructor(value, isError = false) {
     this._value = value;
     this._isError = isError;
   }
   static of(val) {
-    return new SmartBox(val);
+    return new FlowBox(val);
   }
   static error(err) {
-    return new SmartBox(err, true);
+    return new FlowBox(err, true);
   }
 
   get isError() {
@@ -21,16 +29,16 @@ class SmartBox {
     return typeof this._value === 'function' ? this._value() : this._value;
   }
 
-  get isSmartBox() {
-    return this._value instanceof SmartBox;
+  get isFlowBox() {
+    return this._value instanceof FlowBox;
   }
 
-  get() {
+  run() {
     return this.value;
   }
 
   inspect(tag = '') {
-    const label = `SmartBox - ${tag ? `${tag} - ` : ''}${this.isError ? 'Error - ' : 'Value - '}`;
+    const label = `FlowBox - ${tag ? `${tag} - ` : ''}${this.isError ? 'Error - ' : 'Value - '}`;
     console.log(label, this._value);
     return this;
   }
@@ -40,9 +48,9 @@ class SmartBox {
     try {
       const val = this.value;
       fn(val);
-      return SmartBox.of(val);
+      return FlowBox.of(val);
     } catch (err) {
-      return SmartBox.error(err);
+      return FlowBox.error(err);
     }
   }
 
@@ -51,11 +59,11 @@ class SmartBox {
     try {
       const val = this.value;
       if (val instanceof Promise) {
-        return SmartBox.of(val.then(fn));
+        return FlowBox.of(val.then(fn));
       }
-      return SmartBox.of(fn(val));
+      return FlowBox.of(fn(val));
     } catch (err) {
-      return SmartBox.error(err);
+      return FlowBox.error(err);
     }
   }
   flatMap(fn) {
@@ -63,11 +71,52 @@ class SmartBox {
     try {
       const val = this.value;
       if (val instanceof Promise) {
-        return SmartBox.of(val.then(fn).then((res) => res.value));
+        return FlowBox.of(
+          val.then(fn).then((res) => (res instanceof FlowBox ? res.value : res))
+        );
       }
       return fn(val);
     } catch (err) {
-      return SmartBox.error(err);
+      return FlowBox.error(err);
+    }
+  }
+
+  filter(predicate) {
+    if (this.isError || this.isNothing) return this;
+    try {
+      const val = this.value;
+      if (val instanceof Promise) {
+        return FlowBox.of(val.then((res) => (predicate(res) ? res : null)));
+      }
+      return predicate(val) ? FlowBox.of(val) : FlowBox.of(null);
+    } catch (err) {
+      return FlowBox.error(err);
+    }
+  }
+  chain(fn) {
+    return this.flatMap(fn);
+  }
+
+  sequence() {
+    if (this.isError || this.isNothing) return this;
+    try {
+      return FlowBox.of(
+        toArray(this.value).map((v) => (v instanceof FlowBox ? v.run() : v))
+      );
+    } catch (err) {
+      return FlowBox.error(err);
+    }
+  }
+
+  distribute() {
+    if (this.isError || this.isNothing) return this;
+    try {
+      const val = this.value;
+      return FlowBox.of(
+        val.map((v) => (v instanceof FlowBox ? v : FlowBox.of(v)))
+      );
+    } catch (err) {
+      return FlowBox.error(err);
     }
   }
 
@@ -75,15 +124,15 @@ class SmartBox {
     if (this.isError || this.isNothing) return this;
     try {
       const val = this.value;
-      if (val instanceof SmartBox) return val;
+      if (val instanceof FlowBox) return val;
       if (val instanceof Promise) {
-        return SmartBox.of(
-          val.then((v) => (v instanceof SmartBox ? v.value : v))
+        return FlowBox.of(
+          val.then((v) => (v instanceof FlowBox ? v.value : v))
         );
       }
-      return SmartBox.of(val);
+      return FlowBox.of(val);
     } catch (err) {
-      SmartBox.error(err);
+      return FlowBox.error(err);
     }
   }
 
@@ -109,30 +158,4 @@ class SmartBox {
   }
 }
 
-const sleep = (time) => {
-  return new Promise((resolve) => {
-    setTimeout(resolve, time);
-  });
-};
-
-const mine = SmartBox.of(() => {
-  // await sleep(500);
-  return 1;
-});
-
-mine
-  .map((x) => x + 1)
-  .inspect()
-  .map((x) => {
-    x.something();
-    return x;
-  })
-  .fold(
-    (e) => {
-      console.log('error caught by fold', e);
-    },
-    (n) => n,
-    (ok) => {
-      console.log('ok from fold', ok);
-    }
-  );
+export default FlowBox;
