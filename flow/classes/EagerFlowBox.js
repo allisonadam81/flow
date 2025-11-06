@@ -1,10 +1,6 @@
-export const toArray = (collection) => {
-  if (collection?.values) return [...collection.values()];
-  if (collection?.[Symbol.iterator]) return [...collection];
-  if (!collection) return [];
-  if (collection?.constructor === Object) return Object.values(collection);
-  return [collection];
-};
+import { toArray } from '../functions/to/toArray.js';
+import { isPromise } from '../functions/is/isPromise.js';
+import { rethrow } from '../functions/misc/rethrow.js';
 
 class FlowBox {
   constructor(value, isError = false) {
@@ -29,16 +25,32 @@ class FlowBox {
     return this._value === null || this._value === undefined;
   }
 
-  getValue() {
-    return typeof this._value === 'function' ? this._value() : this._value;
-  }
-
   get value() {
     return typeof this._value === 'function' ? this._value() : this._value;
   }
 
+  setIsError(bool) {
+    this._isError = !!bool;
+    return this;
+  }
+  setValue(v) {
+    this._value = v;
+    return this;
+  }
+
+  setAndRethrow(err) {
+    this.setIsError(true);
+    this.setValue(err);
+    rethrow(err);
+    return this;
+  }
+
   run() {
-    return this.getValue();
+    try {
+      return this.value;
+    } catch (err) {
+      return err;
+    }
   }
 
   inspect(tag = '') {
@@ -50,9 +62,8 @@ class FlowBox {
   tap(fn) {
     if (this.isError || this.isNothing) return this;
     try {
-      const val = this.getValue();
-      fn(val);
-      return FlowBox.of(val);
+      fn(this);
+      return this;
     } catch (err) {
       return FlowBox.error(err);
     }
@@ -61,8 +72,8 @@ class FlowBox {
   map(fn) {
     if (this.isError || this.isNothing) return this;
     try {
-      const val = this.getValue();
-      if (val instanceof Promise) {
+      const val = this.value;
+      if (isPromise(val)) {
         return FlowBox.of(val.then(fn));
       }
       return FlowBox.of(fn(val));
@@ -74,12 +85,10 @@ class FlowBox {
   flatMap(fn) {
     if (this.isError || this.isNothing) return this;
     try {
-      const val = this.getValue();
-      if (val instanceof Promise) {
+      const val = this.value;
+      if (isPromise(val)) {
         return FlowBox.of(
-          val
-            .then(fn)
-            .then((res) => (FlowBox.isFlowBox(res) ? res.getValue() : res))
+          val.then(fn).then((res) => (FlowBox.isFlowBox(res) ? res.value : res))
         );
       }
       return fn(val);
@@ -91,8 +100,8 @@ class FlowBox {
   filter(predicate) {
     if (this.isError || this.isNothing) return this;
     try {
-      const val = this.getValue();
-      if (val instanceof Promise) {
+      const val = this.value;
+      if (isPromise(val)) {
         return FlowBox.of(val.then((res) => (predicate(res) ? res : null)));
       }
       return predicate(val) ? FlowBox.of(val) : FlowBox.of(null);
@@ -103,14 +112,12 @@ class FlowBox {
   chain(fn) {
     return this.flatMap(fn);
   }
-  // box.of([box.of(1), box.of(2), box.of(3)]).sequence() => box.of([1,2,3])
+
   sequence() {
     if (this.isError || this.isNothing) return this;
     try {
       return FlowBox.of(
-        toArray(this.getValue()).map((v) =>
-          FlowBox.isFlowBox(v) ? v.run() : v
-        )
+        toArray(this.value).map((v) => (FlowBox.isFlowBox(v) ? v.run() : v))
       );
     } catch (err) {
       return FlowBox.error(err);
@@ -120,7 +127,7 @@ class FlowBox {
   distribute() {
     if (this.isError || this.isNothing) return this;
     try {
-      const val = this.getValue();
+      const val = this.value;
       return FlowBox.of(
         toArray(val).map((v) => (FlowBox.isFlowBox(v) ? v : FlowBox.of(v)))
       );
@@ -132,11 +139,11 @@ class FlowBox {
   flat() {
     if (this.isError || this.isNothing) return this;
     try {
-      const val = this.getValue();
+      const val = this.value;
       if (FlowBox.isFlowBox(val)) return val;
-      if (val instanceof Promise) {
+      if (isPromise(val)) {
         return FlowBox.of(
-          val.then((v) => (FlowBox.isFlowBox(v) ? v.getValue() : v))
+          val.then((v) => (FlowBox.isFlowBox(v) ? v.value : v))
         );
       }
       return FlowBox.of(val);
@@ -145,17 +152,21 @@ class FlowBox {
     }
   }
 
-  fold(onError, onNothing, onOk) {
+  fold(onError, onNothing, onOk, onFinally) {
+    let val;
     try {
-      const val = this.getValue();
-      if (val instanceof Promise) {
+      val = this.value;
+      if (isPromise(val)) {
         return val
           .then((v) => {
             if (this.isError) return onError(v);
             if (this.isNothing) return onNothing(v);
             return onOk(v);
           })
-          .catch(onError);
+          .catch(onError)
+          .finally(() => {
+            onFinally && onFinally();
+          });
       } else {
         if (this.isError) return onError(val);
         if (this.isNothing) return onNothing(val);
@@ -163,8 +174,12 @@ class FlowBox {
       }
     } catch (err) {
       onError(err);
+    } finally {
+      if (onFinally && !isPromise(val)) {
+        onFinally();
+      }
     }
   }
 }
 
-export default FlowBox;
+export const EagerFlowBox = FlowBox

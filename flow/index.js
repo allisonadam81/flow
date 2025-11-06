@@ -1,2 +1,1 @@
-export * from './utils';
-export * from './classes';
+export { FlowBox } from './classes/FlowBox'
