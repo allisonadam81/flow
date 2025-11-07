@@ -117,7 +117,7 @@ class FlowBox {
     if (this.isError || this.isNothing) return this;
     try {
       return FlowBox.of(
-        toArray(this.value).map((v) => (FlowBox.isFlowBox(v) ? v.run() : v))
+        toArray(this.value).map((v) => (FlowBox.isFlowBox(v) ? v.value : v))
       );
     } catch (err) {
       return FlowBox.error(err);
@@ -127,9 +127,10 @@ class FlowBox {
   distribute() {
     if (this.isError || this.isNothing) return this;
     try {
-      const val = this.value;
       return FlowBox.of(
-        toArray(val).map((v) => (FlowBox.isFlowBox(v) ? v : FlowBox.of(v)))
+        toArray(this.value).map((v) =>
+          FlowBox.isFlowBox(v) ? v : FlowBox.of(v)
+        )
       );
     } catch (err) {
       return FlowBox.error(err);
@@ -182,4 +183,4 @@ class FlowBox {
   }
 }
 
-export const EagerFlowBox = FlowBox
+export const EagerFlowBox = FlowBox;
