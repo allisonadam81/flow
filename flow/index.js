@@ -1,5 +1,5 @@
 // CLASSES
-export { FlowBox } from './classes/FlowBox.js';
+export { LazyFlowBox } from './classes/LazyFlowBox.js';
 export { EagerFlowBox } from './classes/EagerFlowBox.js';
 
 // DEBUG
@@ -39,6 +39,7 @@ export { tail } from './functions/locators/tail.js';
 export { cheapClone } from './functions/misc/cheapClone.js';
 export { deferToMacroQueue } from './functions/misc/deferToMacroQueue.js';
 export { deferToMicroQueue } from './functions/misc/deferToMicroQueue.js';
+export { doNothing } from './functions/misc/doNothing.js';
 export { rethrow } from './functions/misc/rethrow.js';
 export { safeParse } from './functions/misc/safeParse.js';
 export { sleep } from './functions/misc/sleep.js';

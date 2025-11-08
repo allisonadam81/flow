@@ -2,7 +2,7 @@ import { toArray } from '../functions/to/toArray.js';
 import { isPromise } from '../functions/is/isPromise.js';
 import { rethrow } from '../functions/misc/rethrow.js';
 
-export class FlowBox {
+class FlowBox {
   constructor(value, isError = false) {
     this._value = value;
     this._isError = isError;
@@ -203,3 +203,5 @@ export class FlowBox {
     }
   }
 }
+
+export const LazyFlowBox = FlowBox;
