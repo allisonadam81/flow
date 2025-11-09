@@ -7,9 +7,17 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@allisonadam81/flow': path.resolve(
+      '@flow/box': path.resolve(
         import.meta.dirname,
-        './@allisonadam81/flow'
+        './@flow/packages/box'
+      ),
+      '@flow/utils': path.resolve(
+        import.meta.dirname,
+        './@flow/packages/utils'
+      ),
+      '@flow/hooks': path.resolve(
+        import.meta.dirname,
+        './@flow/packages/hooks'
       ),
     },
   },
