@@ -73,7 +73,7 @@ class FlowBox {
     return FlowBox.of(() => {
       try {
         const val = this.value;
-        if (val instanceof Promise) {
+        if (isPromise(val)) {
           return val.then(fn).catch(this.setAndRethrow);
         }
         return fn(val);
@@ -88,7 +88,7 @@ class FlowBox {
     return FlowBox.of(() => {
       try {
         const val = this.value;
-        if (val instanceof Promise) {
+        if (isPromise(val)) {
           return FlowBox.of(
             val
               .then(fn)
