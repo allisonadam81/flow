@@ -26,7 +26,7 @@ class FlowBox {
   }
 
   get value() {
-    return typeof this._value === 'function' ? this._value() : this._value;
+    return this._value;
   }
 
   setIsError(bool) {
@@ -67,6 +67,15 @@ class FlowBox {
     } catch (err) {
       return FlowBox.error(err);
     }
+  }
+
+  peak(fn) {
+    return this.tap(fn);
+  }
+
+  ap(box){
+    const val = this.value;
+    
   }
 
   map(fn) {
