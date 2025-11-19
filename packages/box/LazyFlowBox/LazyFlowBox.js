@@ -1,7 +1,8 @@
 export const identity = (v) => v;
-export const invoke = (fn) => fn();
+export const invoke = (fn) => typeof fn === 'function' && fn();
 
 export const isFunction = (fn) => typeof fn === 'function';
+
 const toArray = (collection) => {
   if (collection?.values) return [...collection.values()];
   if (collection?.[Symbol.iterator]) return [...collection];
@@ -14,28 +15,31 @@ const isNullOrUnd = (v) => v === null || v === undefined;
 const isPromise = (v) => v instanceof Promise;
 
 const isBadValue = (v) => {
-  return [() => isError(v), () => isNullOrUnd(v), Number.isNaN(v)].some((fn) =>
-    fn()
+  return [() => isError(v), () => isNullOrUnd(v), () => Number.isNaN(v)].some(
+    (fn) => fn()
   );
 };
 class FlowBox {
-  constructor(thunk) {
-    this.thunk = thunk;
+  constructor(_thunk) {
+    this._thunk = _thunk;
   }
 
   static of(val) {
     return new FlowBox(() => val);
+  }
+  static thunk(t) {
+    return new FlowBox(t);
   }
 
   static isFlowBox(v) {
     return v instanceof FlowBox;
   }
   get value() {
-    return this.thunk();
+    return this._thunk();
   }
 
   map(fn) {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
@@ -58,7 +62,7 @@ class FlowBox {
   }
 
   inspect(tag = '') {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       const label = `FlowBox - ${tag ? `${tag} - ` : ''}'Value - '`;
       console.log(label, this);
       return this.value;
@@ -66,9 +70,17 @@ class FlowBox {
   }
 
   tap(fn) {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       fn(this);
       return this.value;
+    });
+  }
+
+  peak(fn) {
+    return FlowBox.thunk(() => {
+      const val = this.value;
+      fn(val);
+      return val;
     });
   }
 
@@ -81,7 +93,7 @@ class FlowBox {
   }
 
   ap(fb) {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       try {
         const fa = this.value; // value from A
         const vbRaw = FlowBox.isFlowBox(fb) ? fb.value : fb;
@@ -125,10 +137,11 @@ class FlowBox {
   }
 
   traverse(fn) {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
+
         if (isPromise(val)) {
           return val.then((v) => {
             if (isBadValue(v)) return v;
@@ -138,18 +151,20 @@ class FlowBox {
               const result = isBadValue(input)
                 ? input
                 : isPromise(input)
-                  ? input.then((inRes) => {
-                      if (isBadValue(inRes)) return inRes;
-                      return fn(inRes);
-                    })
+                  ? input.then((res) => (isBadValue(res) ? res : fn(res)))
                   : fn(input);
               return FlowBox.isFlowBox(result) ? result.value : result;
             });
           });
         }
+
         return toArray(val).map((el) => {
           const input = FlowBox.isFlowBox(el) ? el.value : el;
-          const result = isBadValue(input) ? input : fn(input);
+          const result = isBadValue(input)
+            ? input
+            : isPromise(input)
+              ? input.then((res) => (isBadValue(res) ? res : fn(res)))
+              : fn(input);
           return FlowBox.isFlowBox(result) ? result.value : result;
         });
       } catch (err) {
@@ -159,7 +174,7 @@ class FlowBox {
   }
 
   flatMap(fn) {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
@@ -179,7 +194,7 @@ class FlowBox {
   }
 
   filter(predicate) {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
@@ -201,7 +216,7 @@ class FlowBox {
   // FlowBox.of([FlowBox(1), FlowBox(2), FlowBox(3)]) turns into ->
   // FlowBox.of([1, 2, 3])
   sequence() {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
@@ -216,7 +231,7 @@ class FlowBox {
   // FlowBox.of([1, 2, 3]) turns into ->
   // FlowBox.of([FlowBox(1), FlowBox(2), FlowBox(3)])
   distribute() {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
@@ -231,7 +246,7 @@ class FlowBox {
 
   // unpacks a nested Flow Box.
   flat() {
-    return FlowBox.of(() => {
+    return FlowBox.thunk(() => {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
@@ -282,10 +297,36 @@ class FlowBox {
 
 export const LazyFlowBox = FlowBox;
 
-const numBox = FlowBox.of(1)
-  .map((x) => x + 1)
-  .run();
+// const numBox = FlowBox.of(1)
+//   .map((x) => x + 1)
+//   .run();
 
-const funcBox = FlowBox.of((x) => x + 1)
-  .map((fn) => fn(2))
-  .run();
+// const funcBox = FlowBox.of((x) => x + 1)
+//   .map((fn) => fn(2))
+//   .run();
+
+const res = FlowBox.of(1)
+  .map((x) => x + 1)
+  .map((x) => x * 2)
+  .flatMap((x) => x - 5);
+// .map((x) => x + 2);
+
+const other = FlowBox.of((x) => x + 1)
+  .ap(2)
+  .traverse((x) => x + 4)
+  .distribute()
+  .sequence();
+
+console.log('RES', other.run());
+res.fold(
+  (e) => {
+    console.log('E', e);
+  },
+  (n) => {
+    console.log('n', n);
+  },
+  (ok) => {
+    console.log('ok', ok);
+  },
+  (f) => console.log('f', f)
+);
