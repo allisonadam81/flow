@@ -1,5 +1,5 @@
 {
-  "name": "@flow/box",
+  "name": "@flow-tools/flow-box",
   "version": "1.0.0",
   "description": "A functional programming monad container that abstracts away async management, try/catch, and maybe/either/task monad concepts.",
   "license": "MIT",

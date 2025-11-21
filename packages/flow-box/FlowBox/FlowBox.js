@@ -295,7 +295,7 @@ class FlowBox {
   }
 }
 
-export const LazyFlowBox = FlowBox;
+export default FlowBox;
 
 // const numBox = FlowBox.of(1)
 //   .map((x) => x + 1)
