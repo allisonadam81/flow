@@ -1,26 +1,14 @@
-export const identity = (v) => v;
-export const invoke = (fn) => typeof fn === 'function' && fn();
+import {
+  invoke,
+  isBadValue,
+  isError,
+  isFunction,
+  isPromise,
+  toArray,
+} from '../utils';
 
-export const isFunction = (fn) => typeof fn === 'function';
-
-const toArray = (collection) => {
-  if (collection?.values) return [...collection.values()];
-  if (collection?.[Symbol.iterator]) return [...collection];
-  if (!collection) return [];
-  if (collection?.constructor === Object) return Object.values(collection);
-  return [collection];
-};
-const isError = (e) => e instanceof Error;
-const isNullOrUnd = (v) => v === null || v === undefined;
-const isPromise = (v) => v instanceof Promise;
-
-const isBadValue = (v) => {
-  return [() => isError(v), () => isNullOrUnd(v), () => Number.isNaN(v)].some(
-    (fn) => fn()
-  );
-};
 class FlowBox {
-  constructor(_thunk) {
+  constructor(_thunk: () => any) {
     this._thunk = _thunk;
   }
 
@@ -179,11 +167,9 @@ class FlowBox {
         const val = this.value;
         if (isBadValue(val)) return val;
         if (isPromise(val)) {
-          return FlowBox.of(
-            val
-              .then((v) => (isBadValue(v) ? v : fn(v)))
-              .then((res) => (FlowBox.isFlowBox(res) ? res.value : res))
-          );
+          return val
+            .then((v) => (isBadValue(v) ? v : fn(v)))
+            .then((res) => (FlowBox.isFlowBox(res) ? res.value : res));
         }
         const res = fn(val);
         return FlowBox.isFlowBox(res) ? res.value : res;
@@ -209,6 +195,7 @@ class FlowBox {
       }
     });
   }
+
   chain(fn) {
     return this.flatMap(fn);
   }
@@ -235,6 +222,15 @@ class FlowBox {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
+        if (isPromise(val)) {
+          return val.then((res) =>
+            isBadValue(res)
+              ? res
+              : toArray(res).map((v) =>
+                  FlowBox.isFlowBox(v) ? v : FlowBox.of(v)
+                )
+          );
+        }
         return toArray(val).map((v) =>
           FlowBox.isFlowBox(v) ? v : FlowBox.of(v)
         );
@@ -296,37 +292,3 @@ class FlowBox {
 }
 
 export default FlowBox;
-
-// const numBox = FlowBox.of(1)
-//   .map((x) => x + 1)
-//   .run();
-
-// const funcBox = FlowBox.of((x) => x + 1)
-//   .map((fn) => fn(2))
-//   .run();
-
-const res = FlowBox.of(1)
-  .map((x) => x + 1)
-  .map((x) => x * 2)
-  .flatMap((x) => x - 5);
-// .map((x) => x + 2);
-
-const other = FlowBox.of((x) => x + 1)
-  .ap(2)
-  .traverse((x) => x + 4)
-  .distribute()
-  .sequence();
-
-console.log('RES', other.run());
-res.fold(
-  (e) => {
-    console.log('E', e);
-  },
-  (n) => {
-    console.log('n', n);
-  },
-  (ok) => {
-    console.log('ok', ok);
-  },
-  (f) => console.log('f', f)
-);
