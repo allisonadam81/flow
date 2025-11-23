@@ -86,38 +86,34 @@ class FlowBox {
         const fa = this.value; // value from A
         const vbRaw = FlowBox.isFlowBox(fb) ? fb.value : fb;
 
-        if (isBadValue(fa)) return fa;
         if (isBadValue(vbRaw)) return vbRaw;
 
         // A is a Promise
         if (isPromise(fa)) {
           return fa.then((faResolved) => {
-            if (isBadValue(faResolved)) return faResolved;
+            if (!isFunction(faResolved)) return faResolved;
 
             // B may also be a Promise
             if (isPromise(vbRaw)) {
-              return vbRaw.then((vbResolved) => {
-                if (isBadValue(vbResolved)) return vbResolved;
-                return isFunction(faResolved)
-                  ? faResolved(vbResolved)
-                  : faResolved;
-              });
+              return vbRaw.then((vbResolved) =>
+                isBadValue(vbResolved) ? vbResolved : faResolved(vbResolved)
+              );
             }
             // B is not a promise
-            return isFunction(faResolved) ? faResolved(vbRaw) : faResolved;
+            return faResolved(vbRaw);
           });
         }
 
+        if (!isFunction(fa)) return fa;
         // A is NOT a promise, but B might be
         if (isPromise(vbRaw)) {
-          return vbRaw.then((vbResolved) => {
-            if (isBadValue(vbResolved)) return vbResolved;
-            return isFunction(fa) ? fa(vbResolved) : fa;
-          });
+          return vbRaw.then((vbResolved) =>
+            isBadValue(vbResolved) ? vbResolved : fa(vbResolved)
+          );
         }
 
         // Both are plain values
-        return isFunction(fa) ? fa(vbRaw) : fa;
+        return fa(vbRaw);
       } catch (err) {
         return err;
       }
@@ -159,6 +155,23 @@ class FlowBox {
         return err;
       }
     });
+  }
+
+  toPromiseAll() {
+    try {
+      return FlowBox.thunk(() => {
+        const val = this.value;
+        if (isBadValue(val)) return val;
+        if (isPromise(val)) {
+          return val.then((res) =>
+            isBadValue(res) ? res : Promise.all(toArray(res))
+          );
+        }
+        return Promise.all(toArray(val));
+      });
+    } catch (err) {
+      return err;
+    }
   }
 
   flatMap(fn) {
@@ -207,7 +220,26 @@ class FlowBox {
       try {
         const val = this.value;
         if (isBadValue(val)) return val;
-        return toArray(val).map((v) => (FlowBox.isFlowBox(v) ? v.value : v));
+        if (isPromise(val)) {
+          return val.then((res) =>
+            isBadValue(res)
+              ? res
+              : toArray(res).map((el) =>
+                  isPromise(el)
+                    ? el.then((e) => (FlowBox.isFlowBox(e) ? e.value : e))
+                    : FlowBox.isFlowBox(el)
+                      ? el.value
+                      : el
+                )
+          );
+        }
+        return toArray(val).map((v) =>
+          isPromise(v)
+            ? v.then((res) => (FlowBox.isFlowBox(res) ? res.value : res))
+            : FlowBox.isFlowBox(v)
+              ? v.value
+              : v
+        );
       } catch (err) {
         return err;
       }
@@ -288,6 +320,27 @@ class FlowBox {
         () => !isPromise(val),
       ].every(invoke) && onFinally();
     }
+  }
+
+  catch(fn) {
+    return FlowBox.thunk(() => {
+      try {
+        const val = this.value;
+        if (isPromise(val)) {
+          return val.then((res) => (isBadValue(res) ? fn(res) : res)).catch(fn);
+        }
+        if (isBadValue(val)) {
+          return fn(val);
+        }
+        return val;
+      } catch (err) {
+        return fn(err);
+      }
+    });
+  }
+
+  recover(fn) {
+    return this.catch(fn);
   }
 }
 
