@@ -1,13 +1,23 @@
 import { invoke, isError, isFunction, isPromise, toArray } from '../utils';
 
+type BadValuePredicate = (v: any) => boolean;
+type BadValue = any | BadValuePredicate;
+
+type FlowBoxConfig = {
+  badValues: BadValue[];
+};
+
 export const defaultConfig = Object.freeze({
   badValues: [null, undefined, isError, Number.isNaN],
 });
 
-class FlowBox {
+class FlowBox<T = any> {
+  private _thunk: () => T;
+  private _config: FlowBoxConfig;
+
   // Static level configs.
-  static _defaultConfig = defaultConfig;
-  static defineConfig(newConfig) {
+  private static _defaultConfig: FlowBoxConfig = defaultConfig;
+  static defineConfig(newConfig: FlowBoxConfig) {
     this._defaultConfig = Object.freeze({
       ...this._defaultConfig,
       ...newConfig,
@@ -17,11 +27,20 @@ class FlowBox {
     this._defaultConfig = defaultConfig;
   }
 
+  static isBadValue(v: any, badValues: BadValue[]) {
+    const badVals = badValues || [];
+    return badVals.some((bv) => {
+      if (v === bv) return true;
+      if (isFunction(bv) && bv(v)) return true;
+      return false;
+    });
+  }
+
   // static instantiation methods and helpers.
-  static of<T>(v: T, c?: typeof defaultConfig) {
+  static of<T>(v: T, c?: FlowBoxConfig) {
     return new FlowBox(() => v, c || FlowBox._defaultConfig);
   }
-  static thunk<T>(t: () => T, c?: typeof defaultConfig) {
+  static thunk<T>(t: () => T, c?: FlowBoxConfig) {
     return new FlowBox(t, c || FlowBox._defaultConfig);
   }
 
@@ -43,13 +62,8 @@ class FlowBox {
     return this._config;
   }
 
-  _isBadValue(v) {
-    const badVals = this.config.badValues || [];
-    return badVals.some((bv) => {
-      if (v === bv) return true;
-      if (typeof bv === 'function' && bv(v)) return true;
-      return false;
-    });
+  private _isBadValue(v: any) {
+    return FlowBox.isBadValue(v, this.config.badValues);
   }
 
   _thunkWithConfig(thunk: () => any) {
@@ -61,7 +75,7 @@ class FlowBox {
   }
 
   withConfig(newConfig: Partial<typeof defaultConfig>) {
-    return FlowBox.thunk(this._thunk, { ...this._config, ...newConfig });
+    return FlowBox.thunk(this._thunk, { ...this.config, ...newConfig });
   }
 
   restoreDefaults() {
