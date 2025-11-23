@@ -231,9 +231,7 @@ class FlowBox<T = any> {
   chain(fn) {
     return this.flatMap(fn);
   }
-  // takes a list of values, turns it into an array, and then unpacks any internal flow boxes in that array.
-  // FlowBox.of([FlowBox(1), FlowBox(2), FlowBox(3)]) turns into ->
-  // FlowBox.of([1, 2, 3])
+
   sequence() {
     return this._thunkWithConfig(() => {
       try {
@@ -265,9 +263,6 @@ class FlowBox<T = any> {
     });
   }
 
-  // takes a raw value in a flow box, turns it into an array, and converts all internal elements into a flow box.
-  // FlowBox.of([1, 2, 3]) turns into ->
-  // FlowBox.of([FlowBox(1), FlowBox(2), FlowBox(3)])
   distribute() {
     return this._thunkWithConfig(() => {
       try {
