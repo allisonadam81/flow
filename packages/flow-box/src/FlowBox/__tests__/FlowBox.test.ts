@@ -463,4 +463,50 @@ describe('FlowBox', () => {
       expect(v).toBe(NaN);
     });
   });
+
+  describe('FlowBox.catch', () => {
+    test('Should catch run time errors and correct them', () => {
+      const box = FlowBox.of(1);
+      const res = box
+        .map((x) => {
+          throw new Error('nah');
+        })
+        .peak((val) => {
+          expect(val).toBeInstanceOf(Error);
+        })
+        .catch((e) => {
+          return 2;
+        })
+        .run();
+      expect(res).toBe(2);
+    });
+    test('Should catch promises and recover them.', async () => {
+      const box = FlowBox.thunk(async () => 1);
+      const res = await box
+        .map((x) => {
+          throw new Error('nah');
+        })
+        .peak((val) => {
+          expect(val).toBeInstanceOf(Promise);
+        })
+        .catch((e) => {
+          return 2;
+        })
+        .run();
+      expect(res).toBe(2);
+    });
+  });
+
+  describe('FlowBox.collect', () => {
+    test('It should run the chain, and return a new FlowBox - should work with of', async () => {
+      const box = FlowBox.of(5);
+      const res = box.map(addOne).collect();
+      expect(res.value).toBe(6);
+    });
+    test('It should run the chain, and return a new FlowBox - should work with thunk', async () => {
+      const box = FlowBox.thunk(() => 5);
+      const res = box.map(addOne).collect();
+      expect(res.value).toBe(6);
+    });
+  });
 });
