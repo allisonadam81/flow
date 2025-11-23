@@ -1,38 +1,81 @@
-import {
-  invoke,
-  isBadValue,
-  isError,
-  isFunction,
-  isPromise,
-  toArray,
-} from '../utils';
+import { invoke, isError, isFunction, isPromise, toArray } from '../utils';
+
+export const defaultConfig = Object.freeze({
+  badValues: [null, undefined, isError, Number.isNaN],
+});
 
 class FlowBox {
-  constructor(_thunk: () => any) {
-    this._thunk = _thunk;
+  // Static level configs.
+  static _defaultConfig = defaultConfig;
+  static defineConfig(newConfig) {
+    this._defaultConfig = Object.freeze({
+      ...this._defaultConfig,
+      ...newConfig,
+    });
+  }
+  static restoreDefaults() {
+    this._defaultConfig = defaultConfig;
   }
 
-  static of(val) {
-    return new FlowBox(() => val);
+  // static instantiation methods and helpers.
+  static of<T>(v: T, c?: typeof defaultConfig) {
+    return new FlowBox(() => v, c || FlowBox._defaultConfig);
   }
-  static thunk(t) {
-    return new FlowBox(t);
+  static thunk<T>(t: () => T, c?: typeof defaultConfig) {
+    return new FlowBox(t, c || FlowBox._defaultConfig);
   }
 
   static isFlowBox(v) {
     return v instanceof FlowBox;
   }
+
+  // Constructor and instance config.
+  constructor(_thunk: () => any, _config = FlowBox._defaultConfig) {
+    this._thunk = _thunk;
+    this._config = _config;
+  }
+
   get value() {
     return this._thunk();
   }
 
+  get config() {
+    return this._config;
+  }
+
+  _isBadValue(v) {
+    const badVals = this.config.badValues || [];
+    return badVals.some((bv) => {
+      if (v === bv) return true;
+      if (typeof bv === 'function' && bv(v)) return true;
+      return false;
+    });
+  }
+
+  _thunkWithConfig(thunk: () => any) {
+    return FlowBox.thunk(thunk, this.config);
+  }
+
+  _ofWithConfig(value: any) {
+    return FlowBox.of(value, this.config);
+  }
+
+  withConfig(newConfig: Partial<typeof defaultConfig>) {
+    return FlowBox.thunk(this._thunk, { ...this._config, ...newConfig });
+  }
+
+  restoreDefaults() {
+    return FlowBox.thunk(this._thunk, FlowBox._defaultConfig);
+  }
+
+  // Instance level Combinators
   map(fn) {
-    return FlowBox.thunk(() => {
+    return this._thunkWithConfig(() => {
       try {
         const val = this.value;
-        if (isBadValue(val)) return val;
+        if (this._isBadValue(val)) return val;
         if (isPromise(val)) {
-          return val.then((v) => (isBadValue(v) ? v : fn(v)));
+          return val.then((v) => (this._isBadValue(v) ? v : fn(v)));
         }
         return fn(val);
       } catch (err) {
@@ -41,52 +84,64 @@ class FlowBox {
     });
   }
 
-  run() {
-    try {
-      return this.value;
-    } catch (err) {
-      return err;
-    }
-  }
-
-  inspect(tag = '') {
-    return FlowBox.thunk(() => {
-      const label = `FlowBox - ${tag ? `${tag} - ` : ''}'Value - '`;
-      console.log(label, this);
-      return this.value;
+  flatMap(fn) {
+    return this._thunkWithConfig(() => {
+      try {
+        const val = this.value;
+        if (this._isBadValue(val)) return val;
+        if (isPromise(val)) {
+          return val
+            .then((v) => (this._isBadValue(v) ? v : fn(v)))
+            .then((res) => (FlowBox.isFlowBox(res) ? res.value : res));
+        }
+        const res = fn(val);
+        return FlowBox.isFlowBox(res) ? res.value : res;
+      } catch (err) {
+        return err;
+      }
     });
   }
 
-  tap(fn) {
-    return FlowBox.thunk(() => {
-      fn(this);
-      return this.value;
+  filter(predicate) {
+    return this._thunkWithConfig(() => {
+      try {
+        const val = this.value;
+        if (this._isBadValue(val)) return val;
+        if (isPromise(val)) {
+          return val.then((res) =>
+            this._isBadValue(res) ? res : predicate(res) ? res : null
+          );
+        }
+        return predicate(val) ? val : null;
+      } catch (err) {
+        return err;
+      }
     });
   }
 
-  peak(fn) {
-    return FlowBox.thunk(() => {
-      const val = this.value;
-      fn(val);
-      return val;
+  flat() {
+    return this._thunkWithConfig(() => {
+      try {
+        const val = this.value;
+        if (this._isBadValue(val)) return val;
+        if (FlowBox.isFlowBox(val)) return val.value;
+        if (isPromise(val)) {
+          return val.then((v) => (FlowBox.isFlowBox(v) ? v.value : v));
+        }
+        return val;
+      } catch (err) {
+        return err;
+      }
     });
-  }
-
-  collect() {
-    try {
-      return FlowBox.of(this.value);
-    } catch (err) {
-      return FlowBox.of(err);
-    }
   }
 
   ap(fb) {
-    return FlowBox.thunk(() => {
+    return this._thunkWithConfig(() => {
       try {
         const fa = this.value; // value from A
         const vbRaw = FlowBox.isFlowBox(fb) ? fb.value : fb;
 
-        if (isBadValue(vbRaw)) return vbRaw;
+        if (this._isBadValue(vbRaw)) return vbRaw;
 
         // A is a Promise
         if (isPromise(fa)) {
@@ -96,7 +151,9 @@ class FlowBox {
             // B may also be a Promise
             if (isPromise(vbRaw)) {
               return vbRaw.then((vbResolved) =>
-                isBadValue(vbResolved) ? vbResolved : faResolved(vbResolved)
+                this._isBadValue(vbResolved)
+                  ? vbResolved
+                  : faResolved(vbResolved)
               );
             }
             // B is not a promise
@@ -108,7 +165,7 @@ class FlowBox {
         // A is NOT a promise, but B might be
         if (isPromise(vbRaw)) {
           return vbRaw.then((vbResolved) =>
-            isBadValue(vbResolved) ? vbResolved : fa(vbResolved)
+            this._isBadValue(vbResolved) ? vbResolved : fa(vbResolved)
           );
         }
 
@@ -121,21 +178,21 @@ class FlowBox {
   }
 
   traverse(fn) {
-    return FlowBox.thunk(() => {
+    return this._thunkWithConfig(() => {
       try {
         const val = this.value;
-        if (isBadValue(val)) return val;
+        if (this._isBadValue(val)) return val;
 
         if (isPromise(val)) {
           return val.then((v) => {
-            if (isBadValue(v)) return v;
+            if (this._isBadValue(v)) return v;
 
             return toArray(v).map((el) => {
               const input = FlowBox.isFlowBox(el) ? el.value : el;
-              const result = isBadValue(input)
+              const result = this._isBadValue(input)
                 ? input
                 : isPromise(input)
-                  ? input.then((res) => (isBadValue(res) ? res : fn(res)))
+                  ? input.then((res) => (this._isBadValue(res) ? res : fn(res)))
                   : fn(input);
               return FlowBox.isFlowBox(result) ? result.value : result;
             });
@@ -144,65 +201,13 @@ class FlowBox {
 
         return toArray(val).map((el) => {
           const input = FlowBox.isFlowBox(el) ? el.value : el;
-          const result = isBadValue(input)
+          const result = this._isBadValue(input)
             ? input
             : isPromise(input)
-              ? input.then((res) => (isBadValue(res) ? res : fn(res)))
+              ? input.then((res) => (this._isBadValue(res) ? res : fn(res)))
               : fn(input);
           return FlowBox.isFlowBox(result) ? result.value : result;
         });
-      } catch (err) {
-        return err;
-      }
-    });
-  }
-
-  toPromiseAll() {
-    try {
-      return FlowBox.thunk(() => {
-        const val = this.value;
-        if (isBadValue(val)) return val;
-        if (isPromise(val)) {
-          return val.then((res) =>
-            isBadValue(res) ? res : Promise.all(toArray(res))
-          );
-        }
-        return Promise.all(toArray(val));
-      });
-    } catch (err) {
-      return err;
-    }
-  }
-
-  flatMap(fn) {
-    return FlowBox.thunk(() => {
-      try {
-        const val = this.value;
-        if (isBadValue(val)) return val;
-        if (isPromise(val)) {
-          return val
-            .then((v) => (isBadValue(v) ? v : fn(v)))
-            .then((res) => (FlowBox.isFlowBox(res) ? res.value : res));
-        }
-        const res = fn(val);
-        return FlowBox.isFlowBox(res) ? res.value : res;
-      } catch (err) {
-        return err;
-      }
-    });
-  }
-
-  filter(predicate) {
-    return FlowBox.thunk(() => {
-      try {
-        const val = this.value;
-        if (isBadValue(val)) return val;
-        if (isPromise(val)) {
-          return val.then((res) =>
-            isBadValue(res) ? res : predicate(res) ? res : null
-          );
-        }
-        return predicate(val) ? val : null;
       } catch (err) {
         return err;
       }
@@ -216,13 +221,13 @@ class FlowBox {
   // FlowBox.of([FlowBox(1), FlowBox(2), FlowBox(3)]) turns into ->
   // FlowBox.of([1, 2, 3])
   sequence() {
-    return FlowBox.thunk(() => {
+    return this._thunkWithConfig(() => {
       try {
         const val = this.value;
-        if (isBadValue(val)) return val;
+        if (this._isBadValue(val)) return val;
         if (isPromise(val)) {
           return val.then((res) =>
-            isBadValue(res)
+            this._isBadValue(res)
               ? res
               : toArray(res).map((el) =>
                   isPromise(el)
@@ -250,21 +255,21 @@ class FlowBox {
   // FlowBox.of([1, 2, 3]) turns into ->
   // FlowBox.of([FlowBox(1), FlowBox(2), FlowBox(3)])
   distribute() {
-    return FlowBox.thunk(() => {
+    return this._thunkWithConfig(() => {
       try {
         const val = this.value;
-        if (isBadValue(val)) return val;
+        if (this._isBadValue(val)) return val;
         if (isPromise(val)) {
           return val.then((res) =>
-            isBadValue(res)
+            this._isBadValue(res)
               ? res
               : toArray(res).map((v) =>
-                  FlowBox.isFlowBox(v) ? v : FlowBox.of(v)
+                  FlowBox.isFlowBox(v) ? v : this._ofWithConfig(v)
                 )
           );
         }
         return toArray(val).map((v) =>
-          FlowBox.isFlowBox(v) ? v : FlowBox.of(v)
+          FlowBox.isFlowBox(v) ? v : this._ofWithConfig(v)
         );
       } catch (err) {
         return err;
@@ -272,21 +277,22 @@ class FlowBox {
     });
   }
 
-  // unpacks a nested Flow Box.
-  flat() {
-    return FlowBox.thunk(() => {
-      try {
-        const val = this.value;
-        if (isBadValue(val)) return val;
-        if (FlowBox.isFlowBox(val)) return val.value;
-        if (isPromise(val)) {
-          return val.then((v) => (FlowBox.isFlowBox(v) ? v.value : v));
-        }
-        return val;
-      } catch (err) {
-        return err;
-      }
-    });
+  // RUNNERS
+
+  run() {
+    try {
+      return this.value;
+    } catch (err) {
+      return err;
+    }
+  }
+
+  collect() {
+    try {
+      return this._ofWithConfig(this.value);
+    } catch (err) {
+      return this._ofWithConfig(err);
+    }
   }
 
   fold(onError, onNothing, onOk, onFinally) {
@@ -297,7 +303,7 @@ class FlowBox {
         return val
           .then((v) => {
             if (isError(v)) return onError(v);
-            if (isBadValue(v)) return onNothing(v);
+            if (this._isBadValue(v)) return onNothing(v);
             return onOk(v);
           })
           .catch(onError)
@@ -308,7 +314,7 @@ class FlowBox {
           );
       } else {
         if (isError(val)) return onError(val);
-        if (isBadValue(val)) return onNothing(val);
+        if (this._isBadValue(val)) return onNothing(val);
         return onOk(val);
       }
     } catch (err) {
@@ -322,14 +328,17 @@ class FlowBox {
     }
   }
 
+  // HELPERS AND ERROR HANDLING
   catch(fn) {
-    return FlowBox.thunk(() => {
+    return this._thunkWithConfig(() => {
       try {
         const val = this.value;
         if (isPromise(val)) {
-          return val.then((res) => (isBadValue(res) ? fn(res) : res)).catch(fn);
+          return val
+            .then((res) => (this._isBadValue(res) ? fn(res) : res))
+            .catch(fn);
         }
-        if (isBadValue(val)) {
+        if (this._isBadValue(val)) {
           return fn(val);
         }
         return val;
@@ -341,6 +350,57 @@ class FlowBox {
 
   recover(fn) {
     return this.catch(fn);
+  }
+
+  toPromiseAll() {
+    try {
+      return this._thunkWithConfig(() => {
+        const val = this.value;
+        if (this._isBadValue(val)) return val;
+        if (isPromise(val)) {
+          return val.then((res) =>
+            this._isBadValue(res) ? res : Promise.all(toArray(res))
+          );
+        }
+        return Promise.all(toArray(val));
+      });
+    } catch (err) {
+      return err;
+    }
+  }
+
+  // Debugging
+
+  inspect(tag = '') {
+    return this._thunkWithConfig(() => {
+      const label = `FlowBox - ${tag ? `${tag} - ` : ''}'Value - '`;
+      console.log(label, this);
+      return this.value;
+    });
+  }
+
+  tap(fn) {
+    return this._thunkWithConfig(() => {
+      try {
+        const val = this.value;
+        fn(this);
+        return val;
+      } catch (err) {
+        return err;
+      }
+    });
+  }
+
+  peak(fn) {
+    return this._thunkWithConfig(() => {
+      try {
+        const val = this.value;
+        fn(val, this.config);
+        return val;
+      } catch (err) {
+        return err;
+      }
+    });
   }
 }
 

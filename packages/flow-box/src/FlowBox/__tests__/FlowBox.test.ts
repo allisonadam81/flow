@@ -1,5 +1,5 @@
 import { expect, test, describe, vi } from 'vitest';
-import FlowBox from '../FlowBox';
+import FlowBox, { defaultConfig } from '../FlowBox';
 
 const sleep = (t = 50) => {
   return new Promise((resolve) => {
@@ -7,7 +7,9 @@ const sleep = (t = 50) => {
   });
 };
 
-const addOne = (x) => x + 1;
+const addOne = (x) => {
+  return x + 1;
+};
 const biggerThanTen = (x) => x > 10;
 describe('FlowBox', () => {
   describe('FlowBox initialization - FlowBox.of, FlowBox.thunk', () => {
@@ -27,6 +29,7 @@ describe('FlowBox', () => {
   describe('FlowBox.map', () => {
     test('Applies the callback to the value.', () => {
       const box = FlowBox.of(5);
+
       expect(box.map((x) => x + 1).run()).toBe(6);
     });
 
@@ -507,6 +510,31 @@ describe('FlowBox', () => {
       const box = FlowBox.thunk(() => 5);
       const res = box.map(addOne).collect();
       expect(res.value).toBe(6);
+    });
+  });
+
+  describe('FlowBox configs', () => {
+    test('It should generate with default values', async () => {
+      const box = FlowBox.of(5);
+      expect(box.config).toEqual(defaultConfig);
+    });
+    test('It should propogate the config to all children later in the pipeline.', async () => {
+      const box = FlowBox.of(5);
+      const res = box
+        .map(addOne)
+        .tap((t) => {
+          expect(t.config).toEqual(defaultConfig);
+        })
+        .withConfig({ badValues: [1, 2, 3] })
+        .tap((t) => {
+          expect(t.config).toEqual({ badValues: [1, 2, 3] });
+        })
+        .map(addOne)
+        .tap((t) => {
+          expect(t.config).toEqual({ badValues: [1, 2, 3] });
+        });
+      expect(res.run()).toBe(7);
+      // expect(res.config).toEqual(defaultConfig);
     });
   });
 });
