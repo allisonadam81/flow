@@ -428,15 +428,14 @@ class FlowBox<T = any> {
     });
   }
 
-  peak(fn) {
-    return this._thunkWithConfig(() => {
+  peak(fn: (val: T, config: FlowBoxConfig) => void): FlowBox<T> {
+    return this._thunkWithConfig<T>(() => {
+      const val = this.value;
       try {
-        const val = this.value;
         fn(val, this.config);
         return val;
-      } catch (err) {
-        return err;
-      }
+      } catch (err) {}
+      return val;
     });
   }
 }
