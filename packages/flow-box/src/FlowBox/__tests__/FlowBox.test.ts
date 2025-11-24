@@ -534,7 +534,25 @@ describe('FlowBox', () => {
           expect(t.config).toEqual({ badValues: [1, 2, 3] });
         });
       expect(res.run()).toBe(7);
-      // expect(res.config).toEqual(defaultConfig);
+    });
+    test('Testing types', async () => {
+      const box = FlowBox.of(5);
+      const box2 = box.map((x: number) => x + 1);
+      console.log(box2);
+      const res = box
+        .map(addOne)
+        .tap((t) => {
+          expect(t.config).toEqual(defaultConfig);
+        })
+        .withConfig({ badValues: [1, 2, 3] })
+        .tap((t) => {
+          expect(t.config).toEqual({ badValues: [1, 2, 3] });
+        })
+        .map(addOne)
+        .tap((t) => {
+          expect(t.config).toEqual({ badValues: [1, 2, 3] });
+        });
+      expect(res.run()).toBe(7);
     });
   });
 });

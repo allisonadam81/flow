@@ -2,6 +2,7 @@ import { invoke, isError, isFunction, isPromise, toArray } from '../utils';
 
 type BadValuePredicate = (v: any) => boolean;
 type BadValue = any | BadValuePredicate;
+type Thunk<T> = () => T;
 
 type FlowBoxConfig = {
   badValues: BadValue[];
@@ -12,7 +13,7 @@ export const defaultConfig = Object.freeze({
 });
 
 class FlowBox<T = any> {
-  private _thunk: () => T;
+  private _thunk: Thunk<T>;
   private _config: FlowBoxConfig;
 
   // Static level configs.
@@ -37,28 +38,28 @@ class FlowBox<T = any> {
   }
 
   // static instantiation methods and helpers.
-  static of<T>(v: T, c?: FlowBoxConfig) {
-    return new FlowBox(() => v, c || FlowBox._defaultConfig);
+  static of<U>(v: U, c?: FlowBoxConfig): FlowBox<U> {
+    return new FlowBox<U>(() => v, c || FlowBox._defaultConfig);
   }
-  static thunk<T>(t: () => T, c?: FlowBoxConfig) {
-    return new FlowBox(t, c || FlowBox._defaultConfig);
+  static thunk<U>(t: Thunk<U>, c?: FlowBoxConfig): FlowBox<U> {
+    return new FlowBox<U>(t, c || FlowBox._defaultConfig);
   }
 
-  static isFlowBox(v) {
+  static isFlowBox(v: any) {
     return v instanceof FlowBox;
   }
 
   // Constructor and instance config.
-  constructor(_thunk: () => any, _config = FlowBox._defaultConfig) {
+  constructor(_thunk: Thunk<T>, _config = FlowBox._defaultConfig) {
     this._thunk = _thunk;
     this._config = _config;
   }
 
-  get value() {
+  get value(): T {
     return this._thunk();
   }
 
-  get config() {
+  get config(): FlowBoxConfig {
     return this._config;
   }
 
@@ -66,28 +67,28 @@ class FlowBox<T = any> {
     return FlowBox.isBadValue(v, this.config.badValues);
   }
 
-  _thunkWithConfig(thunk: () => any) {
-    return FlowBox.thunk(thunk, this.config);
+  _thunkWithConfig<U>(thunk: Thunk<U>): FlowBox<U> {
+    return FlowBox.thunk<U>(thunk, this.config);
   }
 
-  _ofWithConfig(value: any) {
-    return FlowBox.of(value, this.config);
+  _ofWithConfig<U>(value: U): FlowBox<U> {
+    return FlowBox.of<U>(value, this.config);
   }
 
-  withConfig(newConfig: Partial<typeof defaultConfig>) {
-    return FlowBox.thunk(this._thunk, { ...this.config, ...newConfig });
+  withConfig(newConfig: Partial<typeof defaultConfig>): FlowBox<T> {
+    return FlowBox.thunk<T>(this._thunk, { ...this.config, ...newConfig });
   }
 
-  restoreDefaults() {
-    return FlowBox.thunk(this._thunk, FlowBox._defaultConfig);
+  restoreDefaults(): FlowBox<T> {
+    return FlowBox.thunk<T>(this._thunk, FlowBox._defaultConfig);
   }
 
   // Instance level Combinators
-  map(fn) {
-    return this._thunkWithConfig(() => {
+  map<U>(fn: (val: T) => U) {
+    return this._thunkWithConfig<U>(() => {
       try {
         const val = this.value;
-        if (this._isBadValue(val)) return val;
+        if (this._isBadValue(val)) return val as any;
         if (isPromise(val)) {
           return val.then((v) => (this._isBadValue(v) ? v : fn(v)));
         }
@@ -98,11 +99,30 @@ class FlowBox<T = any> {
     });
   }
 
-  flatMap(fn) {
-    return this._thunkWithConfig(() => {
+  filter(predicate: (val: T) => boolean): FlowBox<T | null> {
+    return this._thunkWithConfig<T | null>(() => {
       try {
         const val = this.value;
-        if (this._isBadValue(val)) return val;
+        if (this._isBadValue(val)) return val as any;
+        if (isPromise(val)) {
+          return val.then((res) =>
+            this._isBadValue(res) ? res : predicate(res) ? res : null
+          );
+        }
+        return predicate(val) ? val : null;
+      } catch (err) {
+        return err;
+      }
+    });
+  }
+
+  flatMap<U>(
+    fn: (val: T) => FlowBox<U> | U | Promise<FlowBox<U> | U>
+  ): FlowBox<U> {
+    return this._thunkWithConfig<U>(() => {
+      try {
+        const val = this.value;
+        if (this._isBadValue(val)) return val as any;
         if (isPromise(val)) {
           return val
             .then((v) => (this._isBadValue(v) ? v : fn(v)))
@@ -116,28 +136,11 @@ class FlowBox<T = any> {
     });
   }
 
-  filter(predicate) {
+  flat(): T extends FlowBox<infer U> ? FlowBox<U> : FlowBox<T> {
     return this._thunkWithConfig(() => {
       try {
         const val = this.value;
-        if (this._isBadValue(val)) return val;
-        if (isPromise(val)) {
-          return val.then((res) =>
-            this._isBadValue(res) ? res : predicate(res) ? res : null
-          );
-        }
-        return predicate(val) ? val : null;
-      } catch (err) {
-        return err;
-      }
-    });
-  }
-
-  flat() {
-    return this._thunkWithConfig(() => {
-      try {
-        const val = this.value;
-        if (this._isBadValue(val)) return val;
+        if (this._isBadValue(val)) return val as any;
         if (FlowBox.isFlowBox(val)) return val.value;
         if (isPromise(val)) {
           return val.then((v) => (FlowBox.isFlowBox(v) ? v.value : v));
@@ -146,7 +149,7 @@ class FlowBox<T = any> {
       } catch (err) {
         return err;
       }
-    });
+    }) as any;
   }
 
   ap(fb) {
@@ -288,7 +291,7 @@ class FlowBox<T = any> {
 
   // RUNNERS
 
-  run() {
+  run(): T | unknown {
     try {
       return this.value;
     } catch (err) {
@@ -296,9 +299,9 @@ class FlowBox<T = any> {
     }
   }
 
-  collect() {
+  collect(): FlowBox<T> {
     try {
-      return this._ofWithConfig(this.value);
+      return this._ofWithConfig<T>(this.value);
     } catch (err) {
       return this._ofWithConfig(err);
     }
