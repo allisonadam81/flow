@@ -95,7 +95,7 @@ class FlowBox<T = any> {
         const val = this.value;
         return fn(val);
       } catch (err) {
-        return err;
+        return err as any;
       }
     });
   }
