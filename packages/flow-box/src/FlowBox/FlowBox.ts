@@ -4,6 +4,11 @@ type BadValuePredicate = (v: any) => boolean;
 type BadValue = any | BadValuePredicate;
 type Thunk<T> = () => T;
 
+type MaybePromise<T> = T | Promise<T>;
+
+type Unbox<T> =
+  T extends FlowBox<infer U> ? U : T extends Promise<infer U> ? U : T;
+
 type FlowBoxConfig = {
   badValues: BadValue[];
 };
@@ -84,8 +89,8 @@ class FlowBox<T = any> {
   }
 
   // Instance level Combinators
-  map<U>(fn: (val: T) => U) {
-    return this._thunkWithConfig<U>(() => {
+  map<U>(fn: (val: T) => MaybePromise<U>): FlowBox<MaybePromise<U>> {
+    return this._thunkWithConfig<MaybePromise<U>>(() => {
       try {
         const val = this.value;
         if (this._isBadValue(val)) return val as any;
@@ -99,17 +104,29 @@ class FlowBox<T = any> {
     });
   }
 
-  filter(predicate: (val: T) => boolean): FlowBox<T | null> {
-    return this._thunkWithConfig<T | null>(() => {
+  filter(
+    predicate: (val: T) => MaybePromise<boolean>
+  ): FlowBox<MaybePromise<T | null>> {
+    return this._thunkWithConfig<MaybePromise<T | null>>(() => {
       try {
         const val = this.value;
         if (this._isBadValue(val)) return val as any;
         if (isPromise(val)) {
-          return val.then((res) =>
-            this._isBadValue(res) ? res : predicate(res) ? res : null
-          );
+          return val.then((res) => {
+            if (this._isBadValue(res)) return res;
+            const bool = predicate(res);
+            if (isPromise(bool)) {
+              return bool.then((b) => (b ? res : null));
+            }
+            return bool ? res : null;
+          });
         }
-        return predicate(val) ? val : null;
+
+        const bool = predicate(val);
+        if (isPromise(bool)) {
+          return bool.then((b) => (b ? val : null));
+        }
+        return bool ? val : null;
       } catch (err) {
         return err;
       }
@@ -117,9 +134,9 @@ class FlowBox<T = any> {
   }
 
   flatMap<U>(
-    fn: (val: T) => FlowBox<U> | U | Promise<FlowBox<U> | U>
-  ): FlowBox<U> {
-    return this._thunkWithConfig<U>(() => {
+    fn: (val: T) => FlowBox<MaybePromise<U>> | MaybePromise<U>
+  ): FlowBox<MaybePromise<U>> {
+    return this._thunkWithConfig<MaybePromise<U>>(() => {
       try {
         const val = this.value;
         if (this._isBadValue(val)) return val as any;
@@ -129,6 +146,9 @@ class FlowBox<T = any> {
             .then((res) => (FlowBox.isFlowBox(res) ? res.value : res));
         }
         const res = fn(val);
+        if (isPromise(res)) {
+          return res.then((v) => (FlowBox.isFlowBox(v) ? v.value : v));
+        }
         return FlowBox.isFlowBox(res) ? res.value : res;
       } catch (err) {
         return err;
@@ -136,16 +156,18 @@ class FlowBox<T = any> {
     });
   }
 
-  flat(): T extends FlowBox<infer U> ? FlowBox<U> : FlowBox<T> {
-    return this._thunkWithConfig(() => {
+  flat(): FlowBox<Unbox<T>> {
+    return this._thunkWithConfig<Unbox<T>>(() => {
       try {
         const val = this.value;
         if (this._isBadValue(val)) return val as any;
-        if (FlowBox.isFlowBox(val)) return val.value;
+        if (FlowBox.isFlowBox(val)) return val.value as any;
         if (isPromise(val)) {
-          return val.then((v) => (FlowBox.isFlowBox(v) ? v.value : v));
+          return val.then((v) =>
+            FlowBox.isFlowBox(v) ? (v.value as any) : (v as any)
+          );
         }
-        return val;
+        return val as any;
       } catch (err) {
         return err;
       }
@@ -266,11 +288,11 @@ class FlowBox<T = any> {
     });
   }
 
-  distribute() {
-    return this._thunkWithConfig(() => {
+  distribute(): FlowBox<MaybePromise<FlowBox<Unbox<T>>[]>> {
+    return this._thunkWithConfig<MaybePromise<FlowBox<Unbox<T>>[]>>(() => {
       try {
         const val = this.value;
-        if (this._isBadValue(val)) return val;
+        if (this._isBadValue(val)) return val as any;
         if (isPromise(val)) {
           return val.then((res) =>
             this._isBadValue(res)
@@ -278,11 +300,11 @@ class FlowBox<T = any> {
               : toArray(res).map((v) =>
                   FlowBox.isFlowBox(v) ? v : this._ofWithConfig(v)
                 )
-          );
+          ) as MaybePromise<FlowBox<Unbox<T>>[]>;
         }
         return toArray(val).map((v) =>
           FlowBox.isFlowBox(v) ? v : this._ofWithConfig(v)
-        );
+        ) as MaybePromise<FlowBox<Unbox<T>>[]>;
       } catch (err) {
         return err;
       }
@@ -291,7 +313,7 @@ class FlowBox<T = any> {
 
   // RUNNERS
 
-  run(): T | unknown {
+  run(): MaybePromise<T> {
     try {
       return this.value;
     } catch (err) {
@@ -299,16 +321,21 @@ class FlowBox<T = any> {
     }
   }
 
-  collect(): FlowBox<T> {
+  collect(): FlowBox<MaybePromise<T>> {
     try {
-      return this._ofWithConfig<T>(this.value);
+      return this._ofWithConfig<MaybePromise<T>>(this.value);
     } catch (err) {
       return this._ofWithConfig(err);
     }
   }
 
-  fold(onError, onNothing, onOk, onFinally) {
-    let val;
+  fold<U>(
+    onError: (err: unknown) => U,
+    onNothing: (val: T) => U,
+    onOk: (val: T) => U,
+    onFinally?: () => void
+  ): MaybePromise<U> {
+    let val: MaybePromise<T>;
     try {
       val = this.value;
       if (isPromise(val)) {
@@ -322,7 +349,7 @@ class FlowBox<T = any> {
           .finally(
             () =>
               [() => !!onFinally, () => isFunction(onFinally)].every(invoke) &&
-              onFinally()
+              onFinally?.()
           );
       } else {
         if (isError(val)) return onError(val);
@@ -336,7 +363,7 @@ class FlowBox<T = any> {
         () => !!onFinally,
         () => isFunction(onFinally),
         () => !isPromise(val),
-      ].every(invoke) && onFinally();
+      ].every(invoke) && onFinally?.();
     }
   }
 
