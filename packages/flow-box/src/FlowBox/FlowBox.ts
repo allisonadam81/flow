@@ -332,6 +332,10 @@ class FlowBox<T = any> {
     }
   }
 
+  unwrap() {
+    return this.value;
+  }
+
   collect(): FlowBox<MaybePromise<T>> {
     try {
       return this._ofWithConfig<MaybePromise<T>>(this.value);
@@ -413,6 +417,23 @@ class FlowBox<T = any> {
           );
         }
         return Promise.all(toArray(val));
+      });
+    } catch (err) {
+      return err;
+    }
+  }
+
+  toPromiseAllSettled() {
+    try {
+      return this._thunkWithConfig(() => {
+        const val = this.value;
+        if (this._isBadValue(val)) return val;
+        if (isPromise(val)) {
+          return val.then((res) =>
+            this._isBadValue(res) ? res : Promise.allSettled(toArray(res))
+          );
+        }
+        return Promise.allSettled(toArray(val));
       });
     } catch (err) {
       return err;
