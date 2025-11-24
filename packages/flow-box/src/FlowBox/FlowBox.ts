@@ -410,23 +410,21 @@ class FlowBox<T = any> {
 
   // Debugging
 
-  inspect(tag = '') {
-    return this._thunkWithConfig(() => {
+  inspect(tag = ''): FlowBox<T> {
+    return this._thunkWithConfig<T>(() => {
       const label = `FlowBox - ${tag ? `${tag} - ` : ''}'Value - '`;
       console.log(label, this);
       return this.value;
     });
   }
 
-  tap(fn) {
-    return this._thunkWithConfig(() => {
+  tap(fn: (fb: FlowBox<T>) => void): FlowBox<T> {
+    return this._thunkWithConfig<T>(() => {
+      const val = this.value;
       try {
-        const val = this.value;
         fn(this);
-        return val;
-      } catch (err) {
-        return err;
-      }
+      } catch (err) {}
+      return val;
     });
   }
 
