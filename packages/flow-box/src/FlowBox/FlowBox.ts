@@ -89,6 +89,17 @@ class FlowBox<T = any> {
   }
 
   // Instance level Combinators
+  mutate<U>(fn: (val: T) => MaybePromise<U>): FlowBox<MaybePromise<U>> {
+    return this._thunkWithConfig<MaybePromise<U>>(() => {
+      try {
+        const val = this.value;
+        return fn(val);
+      } catch (err) {
+        return err;
+      }
+    });
+  }
+
   map<U>(fn: (val: T) => MaybePromise<U>): FlowBox<MaybePromise<U>> {
     return this._thunkWithConfig<MaybePromise<U>>(() => {
       try {
