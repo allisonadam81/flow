@@ -14,3 +14,15 @@ export const toArray = (collection: any): any[] => {
 export const isError = <T>(e: T) => e instanceof Error;
 export const isNullOrUnd = <T>(v: T) => v === null || v === undefined;
 export const isPromise = <T>(v: T) => v instanceof Promise;
+
+export const map = (fn) => (a) => a?.map(fn);
+
+export const tryCatchFinally = (t, c = identity, f) => {
+  try {
+    return t();
+  } catch (e) {
+    return c(e);
+  } finally {
+    if (typeof f === 'function') f();
+  }
+};

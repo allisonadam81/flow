@@ -279,7 +279,7 @@ describe('FlowBox', () => {
       expect(await Promise.all(secondLvl)).toEqual([2, 3, 4]);
     });
 
-    test('If value is a promise, and If any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {
+    test('If value is a promise, and if any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {
       const box = FlowBox.thunk(async () => {
         await sleep();
         return [1, 2, FlowBox.of(Promise.resolve(null))];
@@ -287,6 +287,7 @@ describe('FlowBox', () => {
       const fn = vi.fn();
       const traversed = box.traverse(fn);
       const resProm = await traversed.run();
+      console.log('RES PROM', resProm);
       const all = await Promise.all(resProm);
       expect(fn).toHaveBeenCalledTimes(2);
     });
@@ -554,5 +555,9 @@ describe('FlowBox', () => {
         });
       expect(res.run()).toBe(7);
     });
+  });
+
+  test('FlowBox._unpackDeep', async () => {
+    const box = FlowBox.thunk(1);
   });
 });
