@@ -74,12 +74,11 @@ class FlowBox<T = any> {
     return v;
   }
 
-  private _resolve(getValue, onOk, onError = identity) {
+  static resolve(val, onOk, isBadValue, onError = identity) {
     try {
-      const val = getValue();
-      if (this._isBadValue(val)) return val;
+      if (isBadValue(val)) return val;
       if (isPromise(val))
-        return val.then((res) => (this._isBadValue(res) ? res : onOk(res)));
+        return val.then((res) => (isBadValue(res) ? res : onOk(res)));
       return onOk(val);
     } catch (err) {
       return onError(err);
@@ -100,8 +99,12 @@ class FlowBox<T = any> {
     return this._config;
   }
 
-  private _isBadValue(v: any) {
+  _isBadValue(v: any) {
     return FlowBox.isBadValue(v, this.config.badValues);
+  }
+
+  _resolve(val, onOk, onError = identity) {
+    return FlowBox.resolve(val, onOk, this._isBadValue.bind(this), onError);
   }
 
   _thunkWithConfig<U>(thunk: Thunk<U>): FlowBox<U> {
@@ -134,7 +137,7 @@ class FlowBox<T = any> {
 
   map<U>(fn: (val: T) => MaybePromise<U>): FlowBox<MaybePromise<U>> {
     return this._thunkWithConfig<MaybePromise<U>>(() => {
-      return this._resolve(() => this.value, fn);
+      return this._resolve(this.value, fn);
     });
   }
 
@@ -142,16 +145,13 @@ class FlowBox<T = any> {
     predicate: (val: T) => MaybePromise<boolean>
   ): FlowBox<MaybePromise<T | null>> {
     return this._thunkWithConfig<MaybePromise<T | null>>(() => {
-      return this._resolve(
-        () => this.value,
-        (v) => {
-          const bool = predicate(v);
-          if (isPromise(bool)) {
-            return bool.then((res) => (!!res ? v : null));
-          }
-          return !!bool ? v : null;
+      return this._resolve(this.value, (v) => {
+        const bool = predicate(v);
+        if (isPromise(bool)) {
+          return bool.then((res) => (!!res ? v : null));
         }
-      );
+        return !!bool ? v : null;
+      });
     });
   }
 
@@ -159,28 +159,24 @@ class FlowBox<T = any> {
     fn: (val: T) => FlowBox<MaybePromise<U>> | MaybePromise<U>
   ): FlowBox<MaybePromise<U>> {
     return this._thunkWithConfig<MaybePromise<U>>(() => {
-      return this._resolve(
-        () => this.value,
-        (v) => this._resolve(() => fn(v), FlowBox._unpack)
+      return this._resolve(this.value, (v) =>
+        this._resolve(fn(v), FlowBox._unpack)
       );
     });
   }
 
   flat(): FlowBox<Unbox<T>> {
     return this._thunkWithConfig<Unbox<T>>(() => {
-      return this._resolve(() => this.value, FlowBox._unpack);
+      return this._resolve(this.value, FlowBox._unpack);
     }) as any;
   }
 
   ap(fb) {
     return this._thunkWithConfig(() => {
-      return this._resolve(
-        () => this.value,
-        (faResolved) => {
-          if (!isFunction(faResolved)) return faResolved;
-          return this._resolve(() => FlowBox._unpack(fb), faResolved);
-        }
-      );
+      return this._resolve(this.value, (faResolved) => {
+        if (!isFunction(faResolved)) return faResolved;
+        return this._resolve(FlowBox._unpack(fb), faResolved);
+      });
     });
   }
 
@@ -189,10 +185,10 @@ class FlowBox<T = any> {
       return [
         toArray,
         map((el) => FlowBox._unpackDeep(el)),
-        map((el) => this._resolve(() => el, fn)),
+        map((el) => this._resolve(el, fn)),
         map((el) => FlowBox._unpackDeep(el)),
       ].reduce((v, func) => {
-        return this._resolve(() => v, func);
+        return this._resolve(v, func);
       }, this.value);
     });
   }
@@ -204,19 +200,17 @@ class FlowBox<T = any> {
   sequence() {
     return this._thunkWithConfig(() => {
       return [toArray, map((el) => FlowBox._unpackDeep(el))].reduce((v, fn) => {
-        return this._resolve(() => v, fn);
+        return this._resolve(v, fn);
       }, this.value);
     });
   }
 
   distribute(): FlowBox<MaybePromise<FlowBox<Unbox<T>>[]>> {
     return this._thunkWithConfig<MaybePromise<FlowBox<Unbox<T>>[]>>(() => {
-      return this._resolve(
-        () => this.value,
-        (v) =>
-          toArray(v).map((el) =>
-            FlowBox.isFlowBox(el) ? el : this._ofWithConfig(el)
-          )
+      return this._resolve(this.value, (v) =>
+        toArray(v).map((el) =>
+          FlowBox.isFlowBox(el) ? el : this._ofWithConfig(el)
+        )
       );
     });
   }
@@ -307,19 +301,13 @@ class FlowBox<T = any> {
 
   toPromiseAll() {
     return this._thunkWithConfig(() => {
-      return this._resolve(
-        () => this.value,
-        (v) => Promise.all(toArray(v))
-      );
+      return this._resolve(this.value, (v) => Promise.all(toArray(v)));
     });
   }
 
   toPromiseAllSettled() {
     return this._thunkWithConfig(() => {
-      return this._resolve(
-        () => this.value,
-        (v) => Promise.allSettled(toArray(v))
-      );
+      return this._resolve(this.value, (v) => Promise.allSettled(toArray(v)));
     });
   }
 
