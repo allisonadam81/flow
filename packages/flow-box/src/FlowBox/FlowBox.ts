@@ -74,11 +74,11 @@ class FlowBox<T = any> {
     return v;
   }
 
-  static resolve(val, onOk, isBadValue, onError = identity) {
+  static resolve(val, onOk, isBadValue, onError = identity, onBad = identity) {
     try {
-      if (isBadValue(val)) return val;
+      if (isBadValue(val)) return onBad(val);
       if (isPromise(val))
-        return val.then((res) => (isBadValue(res) ? res : onOk(res)));
+        return val.then((res) => (isBadValue(res) ? onBad(res) : onOk(res)));
       return onOk(val);
     } catch (err) {
       return onError(err);
@@ -91,7 +91,15 @@ class FlowBox<T = any> {
     this._config = _config;
   }
 
-  get value(): T {
+  private _thunkWithConfig<U>(thunk: Thunk<U>): FlowBox<U> {
+    return FlowBox.thunk<U>(thunk, this.config);
+  }
+
+  private _ofWithConfig<U>(value: U): FlowBox<U> {
+    return FlowBox.of<U>(value, this.config);
+  }
+
+  private get value(): T {
     return this._thunk();
   }
 
@@ -103,16 +111,14 @@ class FlowBox<T = any> {
     return FlowBox.isBadValue(v, this.config.badValues);
   }
 
-  _resolve(val, onOk, onError = identity) {
-    return FlowBox.resolve(val, onOk, this._isBadValue.bind(this), onError);
-  }
-
-  _thunkWithConfig<U>(thunk: Thunk<U>): FlowBox<U> {
-    return FlowBox.thunk<U>(thunk, this.config);
-  }
-
-  _ofWithConfig<U>(value: U): FlowBox<U> {
-    return FlowBox.of<U>(value, this.config);
+  _resolve(val, onOk, onError = identity, onBad = identity) {
+    return FlowBox.resolve(
+      val,
+      onOk,
+      this._isBadValue.bind(this),
+      onError,
+      onBad
+    );
   }
 
   withConfig(newConfig: Partial<typeof defaultConfig>): FlowBox<T> {
@@ -226,7 +232,11 @@ class FlowBox<T = any> {
   }
 
   unwrap() {
-    return this.value;
+    const val = this.value;
+    if (isError(val)) {
+      throw val;
+    }
+    return val;
   }
 
   collect(): FlowBox<MaybePromise<T>> {
@@ -281,6 +291,20 @@ class FlowBox<T = any> {
       try {
         const val = this.value;
         if (isPromise(val)) {
+          return val.then((v) => (isError(v) ? fn(v) : v)).catch(fn);
+        }
+        return isError(val) ? fn(val) : val;
+      } catch (err) {
+        return fn(err);
+      }
+    });
+  }
+
+  recover(fn) {
+    return this._thunkWithConfig(() => {
+      try {
+        const val = this.value;
+        if (isPromise(val)) {
           return val
             .then((res) => (this._isBadValue(res) ? fn(res) : res))
             .catch(fn);
@@ -293,10 +317,6 @@ class FlowBox<T = any> {
         return fn(err);
       }
     });
-  }
-
-  recover(fn) {
-    return this.catch(fn);
   }
 
   toPromiseAll() {

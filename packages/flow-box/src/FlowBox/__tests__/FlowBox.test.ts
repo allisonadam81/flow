@@ -287,7 +287,6 @@ describe('FlowBox', () => {
       const fn = vi.fn();
       const traversed = box.traverse(fn);
       const resProm = await traversed.run();
-      console.log('RES PROM', resProm);
       const all = await Promise.all(resProm);
       expect(fn).toHaveBeenCalledTimes(2);
     });
@@ -479,7 +478,11 @@ describe('FlowBox', () => {
           expect(val).toBeInstanceOf(Error);
         })
         .catch((e) => {
+          console.log('E', e);
           return 2;
+        })
+        .peak((val) => {
+          console.log('VAL', val);
         })
         .run();
       expect(res).toBe(2);
@@ -557,7 +560,5 @@ describe('FlowBox', () => {
     });
   });
 
-  test('FlowBox._unpackDeep', async () => {
-    const box = FlowBox.thunk(1);
-  });
+  test('FlowBox._unpackDeep', async () => {});
 });
