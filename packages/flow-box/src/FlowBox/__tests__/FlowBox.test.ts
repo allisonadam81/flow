@@ -84,7 +84,6 @@ describe('FlowBox', () => {
       const val = box.map(addOne).map(mock).run();
       try {
         const v = await val;
-        console.log('v', v);
       } catch (e) {
         expect(e).toBeInstanceOf(Error);
       }
@@ -478,17 +477,17 @@ describe('FlowBox', () => {
           expect(val).toBeInstanceOf(Error);
         })
         .catch((e) => {
-          console.log('E', e);
           return 2;
         })
         .peak((val) => {
-          console.log('VAL', val);
+          expect(val).toBe(2);
         })
         .run();
       expect(res).toBe(2);
     });
     test('Should catch promises and recover them.', async () => {
       const box = FlowBox.thunk(async () => 1);
+      const mockFn = vi.fn();
       const res = await box
         .map((x) => {
           throw new Error('nah');
@@ -496,10 +495,13 @@ describe('FlowBox', () => {
         .peak((val) => {
           expect(val).toBeInstanceOf(Promise);
         })
+        .map(mockFn)
         .catch((e) => {
+          expect(e.message).toBe('nah');
           return 2;
         })
         .run();
+      expect(mockFn).not.toHaveBeenCalled();
       expect(res).toBe(2);
     });
   });
@@ -539,26 +541,90 @@ describe('FlowBox', () => {
         });
       expect(res.run()).toBe(7);
     });
-    test('Testing types', async () => {
-      const box = FlowBox.of(5);
-      const box2 = box.map((x: number) => x + 1);
-      console.log(box2);
-      const res = box
-        .map(addOne)
-        .tap((t) => {
-          expect(t.config).toEqual(defaultConfig);
-        })
-        .withConfig({ badValues: [1, 2, 3] })
-        .tap((t) => {
-          expect(t.config).toEqual({ badValues: [1, 2, 3] });
-        })
-        .map(addOne)
-        .tap((t) => {
-          expect(t.config).toEqual({ badValues: [1, 2, 3] });
-        });
-      expect(res.run()).toBe(7);
-    });
   });
 
-  test('FlowBox._unpackDeep', async () => {});
+  describe('Advanced integration tests between methods and promise chains', async () => {
+    const jimmy = { id: 'user-1', firstName: 'Jimmy', lastName: 'Bananas' };
+    const jackie = { id: 'user-2', firstName: 'Jackie', lastName: 'Mangoes' };
+    const jerry = { id: 'user-3', firstName: 'Jerry', lastName: 'Jalapenos' };
+    const users = { 'user-1': jimmy, 'user-2': jackie, 'user-3': jerry };
+    const userIds = Object.keys(users);
+
+    const getUser = async (id) => {
+      await sleep(Math.floor(Math.random() * 50));
+      return users[id];
+    };
+
+    const getUserIds = async () => {
+      await sleep(Math.floor(Math.random() * 50));
+      return userIds;
+    };
+
+    test('Multiple async pipelines running in parallel', async () => {
+      const getIdsBox = FlowBox.of(getUserIds);
+      const res = await getIdsBox
+        .map((fn) => fn())
+        .peak((v) => {
+          expect(v).toBeInstanceOf(Promise);
+        })
+        .traverse((id) => async () => getUser(id))
+        // .peak(async (v) => {
+        //   const val = await v;
+        //   console.log('traversed', val);
+        //   expect(val.length).toBe(3);
+        //   val.forEach((fn) => expect(fn).toBeInstanceOf(Function));
+        // })
+        .distribute()
+        // .peak(async (v) => {
+        //   const val = await v;
+        //   console.log('distributed', val);
+        //   val.forEach((fb) => expect(FlowBox.isFlowBox(fb)).toBeTruthy());
+        // })
+        .sequence()
+        // .peak(async (v) => {
+        //   const val = await v;
+        //   console.log('sequenced', val);
+        //   val.forEach((fb) => expect(FlowBox.isFlowBox(fb)).not.toBeTruthy());
+        // })
+        .traverse((fn) => fn())
+        // .peak(async (v) => {
+        //   const val = await v;
+        //   console.log('invoked', val);
+        // })
+        .toPromiseAll()
+        .map(async (users) => {
+          await getUserIds();
+          return users.map((user) => ({
+            ...user,
+            displayname: `${user.firstName} ${user.lastName}`,
+          }));
+        })
+        .run();
+      // console.log('res', res);
+      expect(res.length).toBe(3);
+    });
+
+    test('Error propagation', async () => {
+      const box = FlowBox.thunk(() => Promise.reject(false));
+      const fn = vi.fn();
+      const res = await box
+        .map(fn)
+        .map(fn)
+        .flatMap(fn)
+        .traverse(fn)
+
+        .distribute()
+        .sequence()
+        .map((x) => {
+          throw new Error('nah');
+        })
+        .flat()
+        .run()
+        .catch((v) => {
+          return v;
+        });
+      expect(fn).not.toHaveBeenCalled();
+      expect(res).toBe(false);
+    });
+  });
 });
