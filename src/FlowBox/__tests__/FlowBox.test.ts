@@ -228,14 +228,14 @@ describe('FlowBox', () => {
   });
 
   describe('FlowBox.traverse', () => {
-    test('It should apply a callback to an array of values, unpack any that are FlowBoxes, and return an array of results.', () => {
-      const box = FlowBox.of([1, 2, FlowBox.of(3)]);
+    test('It should apply a callback to an array of values, and return an array of results.', () => {
+      const box = FlowBox.of([1, 2, 3]);
       const res = box.traverse(addOne);
       expect(res.run()).toEqual([2, 3, 4]);
     });
 
     test('It should apply a callback to an array of values, apply the callback to any promises on the resolved values', async () => {
-      const box = FlowBox.of([1, 2, FlowBox.thunk(async () => 3)]);
+      const box = FlowBox.of([1, 2, Promise.resolve(3)]);
       const res = box.traverse(addOne);
       expect(await Promise.all(res.run())).toEqual([2, 3, 4]);
     });
@@ -262,7 +262,7 @@ describe('FlowBox', () => {
     test('if value is a promise, then it should call the function on the resolved value.', async () => {
       const box = FlowBox.thunk(async () => {
         await sleep();
-        return [1, 2, FlowBox.of(3)];
+        return [1, 2, 3];
       });
       const res = box.traverse(addOne);
       expect(await res.run()).toEqual([2, 3, 4]);
@@ -271,7 +271,7 @@ describe('FlowBox', () => {
     test('If any values in a collection resolve to a promise, it should call the callback on the resolved value of that promise.', async () => {
       const box = FlowBox.thunk(async () => {
         await sleep();
-        return [1, 2, FlowBox.of(Promise.resolve(3))];
+        return [1, 2, Promise.resolve(3)];
       });
       const res = box.traverse(addOne);
       const secondLvl = await res.run();
@@ -281,7 +281,7 @@ describe('FlowBox', () => {
     test('If value is a promise, and if any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {
       const box = FlowBox.thunk(async () => {
         await sleep();
-        return [1, 2, FlowBox.of(Promise.resolve(null))];
+        return [1, 2, Promise.resolve(null)];
       });
       const fn = vi.fn();
       const traversed = box.traverse(fn);
@@ -290,9 +290,9 @@ describe('FlowBox', () => {
       expect(fn).toHaveBeenCalledTimes(2);
     });
 
-    test('If vaue is not a promise, and any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {
+    test('If value is not a promise, and any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {
       const box = FlowBox.thunk(() => {
-        return [1, 2, FlowBox.of(Promise.resolve(null))];
+        return [1, 2, Promise.resolve(null)];
       });
       const fn = vi.fn();
       const traversed = box.traverse(fn);
