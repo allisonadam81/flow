@@ -5,7 +5,7 @@ import {
   isFunction,
   isPromise,
   map,
-  toArray,
+  toValues,
 } from '../utils';
 
 type BadValuePredicate = (v: any) => boolean;
@@ -189,7 +189,7 @@ class FlowBox<T = any> {
   traverse(fn) {
     return this._thunkWithConfig(() => {
       return [
-        toArray,
+        toValues,
         map((el) => FlowBox._unpackDeep(el)),
         map((el) => this._resolve(el, fn)),
         map((el) => FlowBox._unpackDeep(el)),
@@ -205,7 +205,7 @@ class FlowBox<T = any> {
 
   sequence() {
     return this._thunkWithConfig(() => {
-      return [toArray, map((el) => FlowBox._unpackDeep(el))].reduce((v, fn) => {
+      return [toValues, map((el) => FlowBox._unpackDeep(el))].reduce((v, fn) => {
         return this._resolve(v, fn);
       }, this.value);
     });
@@ -214,7 +214,7 @@ class FlowBox<T = any> {
   distribute(): FlowBox<MaybePromise<FlowBox<Unbox<T>>[]>> {
     return this._thunkWithConfig<MaybePromise<FlowBox<Unbox<T>>[]>>(() => {
       return this._resolve(this.value, (v) =>
-        toArray(v).map((el) =>
+        toValues(v).map((el) =>
           FlowBox.isFlowBox(el) ? el : this._ofWithConfig(el)
         )
       );
@@ -321,13 +321,13 @@ class FlowBox<T = any> {
 
   toPromiseAll() {
     return this._thunkWithConfig(() => {
-      return this._resolve(this.value, (v) => Promise.all(toArray(v)));
+      return this._resolve(this.value, (v) => Promise.all(toValues(v)));
     });
   }
 
   toPromiseAllSettled() {
     return this._thunkWithConfig(() => {
-      return this._resolve(this.value, (v) => Promise.allSettled(toArray(v)));
+      return this._resolve(this.value, (v) => Promise.allSettled(toValues(v)));
     });
   }
 
