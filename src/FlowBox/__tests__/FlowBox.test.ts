@@ -24,6 +24,20 @@ describe('FlowBox', () => {
       expect(typeof box._thunk).toBe('function');
       expect(box.run()).toBe(6);
     });
+
+    test('readme', () => {
+      const numberToDeclaration = FlowBox.of(5)
+        .map((x) => x + 1)
+        .map((x) => new Array(x).fill(null).map((n, i) => i))
+        .traverse((idx) => [idx, idx + 1])
+        .distribute()
+        .traverse((box) =>
+          box.map((arr) => `I have val ${arr[1]} at ${arr[0]} in a box`)
+        )
+        .sequence();
+
+      console.log('nuber pipeline', numberToDeclaration.run());
+    });
   });
 
   describe('FlowBox.map', () => {
@@ -272,10 +286,10 @@ describe('FlowBox', () => {
       const box = FlowBox.thunk(async () => {
         await sleep();
         return [1, 2, Promise.resolve(3)];
-      });
-      const res = box.traverse(addOne);
-      const secondLvl = await res.run();
-      expect(await Promise.all(secondLvl)).toEqual([2, 3, 4]);
+      }).traverse(addOne);
+
+      const res = await box.run();
+      expect(await Promise.all(res)).toEqual([2, 3, 4]);
     });
 
     test('If value is a promise, and if any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {

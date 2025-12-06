@@ -81,8 +81,8 @@ class FlowBox<T = any> {
    * const box = FlowBox.of(42);
    * box.run(); // 42
    */
-  static of<U>(v: U, c?: FlowBoxConfig): FlowBox<U> {
-    return new FlowBox<U>(() => v, c || FlowBox._defaultConfig);
+  static of(v: any, c?: FlowBoxConfig) {
+    return new FlowBox(() => v, c || FlowBox._defaultConfig);
   }
 
   /**
@@ -102,8 +102,8 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 42);
    * await asyncBox.run(); // 42
    */
-  static thunk<U>(t: Thunk<U>, c?: FlowBoxConfig): FlowBox<U> {
-    return new FlowBox<U>(t, c || FlowBox._defaultConfig);
+  static thunk(t: any, c?: FlowBoxConfig) {
+    return new FlowBox(t, c || FlowBox._defaultConfig);
   }
 
   /**
@@ -117,7 +117,7 @@ class FlowBox<T = any> {
    * FlowBox.isFlowBox(box); // true
    * FlowBox.isFlowBox(42);  // false
    */
-  static isFlowBox(v: any) {
+  static isFlowBox(v: any): v is FlowBox {
     return v instanceof FlowBox;
   }
 
@@ -135,9 +135,9 @@ class FlowBox<T = any> {
 
   static resolve(val, onOk, isBadValue, onError = identity, onBad = identity) {
     try {
-      if (isBadValue(val)) return onBad(val);
       if (isPromise(val))
         return val.then((res) => (isBadValue(res) ? onBad(res) : onOk(res)));
+      if (isBadValue(val)) return onBad(val);
       return onOk(val);
     } catch (err) {
       return onError(err);
@@ -150,12 +150,12 @@ class FlowBox<T = any> {
     this._config = _config;
   }
 
-  private _thunkWithConfig<U>(thunk: Thunk<U>): FlowBox<U> {
-    return FlowBox.thunk<U>(thunk, this.config);
+  private _thunkWithConfig(thunk: any) {
+    return FlowBox.thunk(thunk, this.config);
   }
 
-  private _ofWithConfig<U>(value: U): FlowBox<U> {
-    return FlowBox.of<U>(value, this.config);
+  private _ofWithConfig(value: any) {
+    return FlowBox.of(value, this.config);
   }
 
   private get value(): T {
@@ -171,7 +171,7 @@ class FlowBox<T = any> {
     return this._config;
   }
 
-  _isBadValue(v: any) {
+  _isBadValue(v: any): boolean {
     return FlowBox.isBadValue(v, this.config.badValues);
   }
 
@@ -234,8 +234,8 @@ class FlowBox<T = any> {
    * const newBox = box.mutate(async x => x + 1);
    * await newBox.run(); // 6
    */
-  mutate<U>(fn: (val: T) => MaybePromise<U>): FlowBox<MaybePromise<U>> {
-    return this._thunkWithConfig<MaybePromise<U>>(() => {
+  mutate(fn) {
+    return this._thunkWithConfig(() => {
       try {
         const val = this.value;
         return fn(val);
@@ -263,8 +263,8 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 5); // Promise resolving to 5
    * const result = await asyncBox.map(async x => x + 1).run(); // Promise resolving to 6
    */
-  map<U>(fn: (val: T) => MaybePromise<U>): FlowBox<MaybePromise<U>> {
-    return this._thunkWithConfig<MaybePromise<U>>(() => {
+  map(fn) {
+    return this._thunkWithConfig(() => {
       return this._resolve(this.value, fn);
     });
   }
@@ -287,10 +287,8 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 5);
    * const filtered = await asyncBox.filter(async x => x > 3).run(); // Promise resolving to 5
    */
-  filter(
-    predicate: (val: T) => MaybePromise<boolean>
-  ): FlowBox<MaybePromise<T | null>> {
-    return this._thunkWithConfig<MaybePromise<T | null>>(() => {
+  filter(predicate) {
+    return this._thunkWithConfig(() => {
       return this._resolve(this.value, (v) => {
         const bool = predicate(v);
         if (isPromise(bool)) {
@@ -320,10 +318,8 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 5);
    * const result = await asyncBox.flatMap(x => FlowBox.thunk(async () => x + 1)).run(); // Promise resolving to 6
    */
-  flatMap<U>(
-    fn: (val: T) => FlowBox<MaybePromise<U>> | MaybePromise<U>
-  ): FlowBox<MaybePromise<U>> {
-    return this._thunkWithConfig<MaybePromise<U>>(() => {
+  flatMap(fn) {
+    return this._thunkWithConfig(() => {
       return this._resolve(this.value, (v) =>
         this._resolve(fn(v), FlowBox._unpack)
       );
@@ -346,8 +342,8 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => FlowBox.of(5));
    * const flatBox = await asyncBox.flat().run(); // Promise resolving to 5
    */
-  flat(): FlowBox<Unbox<T>> {
-    return this._thunkWithConfig<Unbox<T>>(() => {
+  flat() {
+    return this._thunkWithConfig(() => {
       return this._resolve(this.value, FlowBox._unpack);
     }) as any;
   }
@@ -384,8 +380,7 @@ class FlowBox<T = any> {
   /**
    * Turns a FlowBox value into an array through `toValues` and applies a function to each element.
    *
-   * The function can return a FlowBox, a promise, or a plain value. **Each result is deeply unpacked after the callback is applied**,
-   * so nested FlowBoxes or promises are automatically resolved. The resulting FlowBox will contain an array of the transformed values.
+   * The function can return a promise, or a plain value.,
    *
    * @template U The type of values returned by the callback function.
    * @param {(val: any) => FlowBox<U> | Promise<U> | U} fn - A function to apply to each element of the collection.
@@ -407,13 +402,15 @@ class FlowBox<T = any> {
    */
   traverse(fn) {
     return this._thunkWithConfig(() => {
+      const val = this.value;
       return [
         toValues,
+        map((el) => FlowBox._unpackDeep(el)),
         map((el) => this._resolve(el, fn)),
         map((el) => FlowBox._unpackDeep(el)),
       ].reduce((v, func) => {
         return this._resolve(v, func);
-      }, this.value);
+      }, val);
     });
   }
   /**
@@ -475,13 +472,14 @@ class FlowBox<T = any> {
    * const box = FlowBox.of(1);
    * const result = FlowBox.distribute().run() // [1];
    */
-  distribute(): FlowBox<MaybePromise<FlowBox<Unbox<T>>[]>> {
-    return this._thunkWithConfig<MaybePromise<FlowBox<Unbox<T>>[]>>(() => {
-      return this._resolve(this.value, (v) =>
-        toValues(v).map((el) =>
-          FlowBox.isFlowBox(el) ? el : this._ofWithConfig(el)
-        )
-      );
+  distribute() {
+    return this._thunkWithConfig(() => {
+      return [
+        toValues,
+        map((el) => (FlowBox.isFlowBox(el) ? el : this._ofWithConfig(el))),
+      ].reduce((v, fn) => {
+        return this._resolve(v, fn);
+      }, this.value);
     });
   }
 
@@ -504,7 +502,7 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 5);
    * console.log(await asyncBox.run()); // 5
    */
-  run(): MaybePromise<T> {
+  run() {
     try {
       return this.value;
     } catch (err) {
@@ -559,9 +557,9 @@ class FlowBox<T = any> {
    * const collected = errorBox.collect();
    * console.log(collected.run()); // Error object
    */
-  collect(): FlowBox<MaybePromise<T>> {
+  collect() {
     try {
-      return this._ofWithConfig<MaybePromise<T>>(this.value);
+      return this._ofWithConfig(this.value);
     } catch (err) {
       return this._ofWithConfig(err);
     }
@@ -617,13 +615,8 @@ class FlowBox<T = any> {
    * );
    * console.log(result); // "Ok: 42"
    */
-  fold<U>(
-    onError: (err: unknown) => U,
-    onNothing: (val: T) => U,
-    onOk: (val: T) => U,
-    onFinally?: () => void
-  ): MaybePromise<U> {
-    let val: MaybePromise<T>;
+  fold<U>(onError, onNothing, onOk, onFinally): MaybePromise<U> {
+    let val;
     try {
       val = this.value;
       if (isPromise(val)) {
@@ -764,7 +757,7 @@ class FlowBox<T = any> {
   // Debugging
 
   /**
-   * Logs the FlowBox itself for debugging purposes with an optional tag.
+   * Logs the value for debugging purposes.
    *
    * Does not modify the value, just prints to the console.
    *
@@ -773,13 +766,14 @@ class FlowBox<T = any> {
    *
    * @example
    * const box = FlowBox.of(42);
-   * box.inspect('Debug').run(); // Logs: FlowBox - Debug - 'Value - ' FlowBox {...}
+   * box.inspect('Debug').run(); // Logs: FlowBox - Debug - 'Value - 42'
    */
-  inspect(tag = ''): FlowBox<T> {
+  inspect(tag = '') {
     return this._thunkWithConfig<T>(() => {
+      const val = this.value;
       const label = `FlowBox - ${tag ? `${tag} - ` : ''}'Value - '`;
-      console.log(label, this);
-      return this.value;
+      console.log(label, val);
+      return val;
     });
   }
 
@@ -795,7 +789,7 @@ class FlowBox<T = any> {
    * const box = FlowBox.of(42);
    * box.tap(fb => console.log('Current value:', fb.run())).run();
    */
-  tap(fn: (fb: FlowBox<T>) => void): FlowBox<T> {
+  tap(fn) {
     return this._thunkWithConfig<T>(() => {
       const val = this.value;
       try {
@@ -817,7 +811,7 @@ class FlowBox<T = any> {
    * const box = FlowBox.of(42);
    * box.peak((val, config) => console.log('Value:', val, 'Config:', config)).run(); // logs 'Value: 42', 'Config: config'
    */
-  peak(fn: (val: T, config: FlowBoxConfig) => void): FlowBox<T> {
+  peak(fn: (val: any, config: FlowBoxConfig) => void) {
     return this._thunkWithConfig<T>(() => {
       const val = this.value;
       try {
