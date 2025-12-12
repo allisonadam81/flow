@@ -6,7 +6,6 @@ import {
   isError,
   isFunction,
   isPromise,
-  toValues,
   head,
 } from '../utils';
 
@@ -20,11 +19,13 @@ type FlowBoxConfig = {
   badValues: BadValue[];
 };
 
+type MaybeFlowBox<U = any> = U | FlowBox<U>;
+
 export const defaultConfig = Object.freeze({
   badValues: [null, undefined, isError, Number.isNaN],
 });
 
-class FlowBox<T = any> {
+class FlowBox<T> {
   private _thunk: Thunk<T>;
   private _config: FlowBoxConfig;
 
@@ -58,7 +59,7 @@ class FlowBox<T = any> {
     this._defaultConfig = defaultConfig;
   }
 
-  private static isBadValue(v: any, badValues: BadValue[]) {
+  private static isBadValue<U>(v: U, badValues: BadValue[]) {
     const badVals = badValues || [];
     return badVals.some((bv) => {
       if (v === bv) return true;
@@ -80,8 +81,8 @@ class FlowBox<T = any> {
    * const box = FlowBox.of(42);
    * box.run(); // 42
    */
-  static of(v: any, c?: FlowBoxConfig) {
-    return new FlowBox(() => v, c || FlowBox._defaultConfig);
+  static of<U>(v: U, c?: FlowBoxConfig): FlowBox<U> {
+    return new FlowBox<U>(() => v, c || FlowBox._defaultConfig);
   }
 
   /**
@@ -101,7 +102,7 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 42);
    * await asyncBox.run(); // 42
    */
-  static thunk(t: any, c?: FlowBoxConfig) {
+  static thunk<U>(t: Thunk<U>, c?: FlowBoxConfig): FlowBox<U> {
     return new FlowBox(t, c || FlowBox._defaultConfig);
   }
 
@@ -116,7 +117,7 @@ class FlowBox<T = any> {
    * FlowBox.isFlowBox(box); // true
    * FlowBox.isFlowBox(42);  // false
    */
-  static isFlowBox(v: any): v is FlowBox {
+  static isFlowBox(v: any): v is FlowBox<any> {
     return v instanceof FlowBox;
   }
 
@@ -126,16 +127,24 @@ class FlowBox<T = any> {
     return v;
   }
 
-  private static _unboxDeep(v: any) {
+  private static _unboxDeep(v: any): any {
     if (FlowBox.isFlowBox(v)) return FlowBox._unboxDeep(v.value);
     if (isPromise(v)) return v.then(FlowBox._unboxDeep);
     return v;
   }
 
-  static resolve(val, onOk, isBadValue, onError = identity, onBad = identity) {
+  static resolve(
+    val: any,
+    onOk: any,
+    isBadValue: any,
+    onError = identity,
+    onBad = identity
+  ) {
     try {
       if (isPromise(val))
-        return val.then((res) => (isBadValue(res) ? onBad(res) : onOk(res)));
+        return val.then((res: any) =>
+          isBadValue(res) ? onBad(res) : onOk(res)
+        );
       if (isBadValue(val)) return onBad(val);
       return onOk(val);
     } catch (err) {
@@ -149,12 +158,12 @@ class FlowBox<T = any> {
     this._config = _config;
   }
 
-  private _thunkWithConfig(thunk: any) {
-    return FlowBox.thunk(thunk, this.config);
+  private _thunkWithConfig<U>(thunk: Thunk<U>) {
+    return FlowBox.thunk<U>(thunk, this.config);
   }
 
-  private _ofWithConfig(value: any) {
-    return FlowBox.of(value, this.config);
+  private _ofWithConfig<U>(value: U) {
+    return FlowBox.of<U>(value, this.config);
   }
 
   private get value(): T {
@@ -170,11 +179,11 @@ class FlowBox<T = any> {
     return this._config;
   }
 
-  _isBadValue(v: any): boolean {
+  _isBadValue<U>(v: U): boolean {
     return FlowBox.isBadValue(v, this.config.badValues);
   }
 
-  _resolve(val, onOk, onError = identity, onBad = identity) {
+  _resolve(val: any, onOk: any, onError = identity, onBad = identity) {
     return FlowBox.resolve(
       val,
       onOk,
@@ -233,8 +242,8 @@ class FlowBox<T = any> {
    * const newBox = box.mutate(async x => x + 1);
    * await newBox.run(); // 6
    */
-  mutate(fn) {
-    return this._thunkWithConfig(() => {
+  mutate<U = any>(fn: (v: T) => U) {
+    return this._thunkWithConfig<U>(() => {
       try {
         const val = this.value;
         return fn(val);
@@ -262,8 +271,8 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 5); // Promise resolving to 5
    * const result = await asyncBox.map(async x => x + 1).run(); // Promise resolving to 6
    */
-  map(fn) {
-    return this._thunkWithConfig(() => {
+  map<U = any>(fn: (val: T) => U) {
+    return this._thunkWithConfig<U>(() => {
       return this._resolve(this.value, fn);
     });
   }
@@ -286,9 +295,9 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 5);
    * const filtered = await asyncBox.filter(async x => x > 3).run(); // Promise resolving to 5
    */
-  filter(predicate) {
+  filter(predicate: (val: T) => boolean | Promise<boolean>) {
     return this._thunkWithConfig(() => {
-      return this._resolve(this.value, (v) => {
+      return this._resolve(this.value, (v: any) => {
         const bool = predicate(v);
         if (isPromise(bool)) {
           return bool.then((res) => (!!res ? v : null));
@@ -317,9 +326,9 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => 5);
    * const result = await asyncBox.flatMap(x => FlowBox.thunk(async () => x + 1)).run(); // Promise resolving to 6
    */
-  flatMap(fn) {
+  flatMap<U = any>(fn: (v: T) => MaybeFlowBox<U>) {
     return this._thunkWithConfig(() => {
-      return this._resolve(this.value, (v) =>
+      return this._resolve(this.value, (v: T) =>
         this._resolve(fn(v), FlowBox._unbox)
       );
     });
@@ -344,7 +353,7 @@ class FlowBox<T = any> {
   flat() {
     return this._thunkWithConfig(() => {
       return this._resolve(this.value, FlowBox._unbox);
-    });
+    }) as any;
   }
   /**
    * Recursively flattens FlowBoxes or promises that resolve to FlowBoxes until a value is reached.
@@ -376,10 +385,10 @@ class FlowBox<T = any> {
    * const asyncValBox = FlowBox.thunk(async () => 2);
    * const result = await asyncFnBox.ap(asyncValBox).run(); // Promise resolving to 3
    */
-  ap(fb) {
+  ap<U = any, V = any>(fb: MaybeFlowBox<V>) {
     return this._thunkWithConfig(() => {
-      return this._resolve(this.value, (faResolved) => {
-        if (!isFunction(faResolved)) return faResolved;
+      return this._resolve(this.value, (faResolved: Function) => {
+        if (!isFunction(faResolved)) return faResolved as U;
         return this._resolve(FlowBox._unbox(fb), faResolved);
       });
     });
@@ -415,30 +424,30 @@ class FlowBox<T = any> {
    * Map([['1', 'bye!'], ['2', 'no!']])
    *
    */
-  traverse(fn) {
+  traverse(fn: any) {
     return this._thunkWithConfig(() => {
       const val = this.value;
       return [
         FlowBox._unboxDeep,
-        (src) => ({ src, entries: toEntries(src) }),
-        (cxt) => ({
+        (src: any) => ({ src, entries: toEntries(src) }),
+        (cxt: any) => ({
           ...cxt,
-          entries: cxt.entries.map(([k, v]) => [k, FlowBox._unboxDeep(v)]),
+          entries: cxt.entries.map(([k, v]: any) => [k, FlowBox._unboxDeep(v)]),
         }),
-        (cxt) => {
+        (cxt: any) => {
           return {
             ...cxt,
-            entries: cxt.entries.map(([k, v]) => [
+            entries: cxt.entries.map(([k, v]: any) => [
               k,
-              this._resolve(v, (v) => fn(v, k, cxt.src)),
+              this._resolve(v, (v: any) => fn(v, k, cxt.src)),
             ]),
           };
         },
-        (cxt) => ({
+        (cxt: any) => ({
           ...cxt,
-          entries: cxt.entries.map(([k, v]) => [k, FlowBox._unboxDeep(v)]),
+          entries: cxt.entries.map(([k, v]: any) => [k, FlowBox._unboxDeep(v)]),
         }),
-        (cxt) => fromEntries(cxt.entries, cxt.src),
+        (cxt: any) => fromEntries(cxt.entries, cxt.src),
       ].reduce((v, func) => {
         return this._resolve(v, func);
       }, val);
@@ -447,7 +456,7 @@ class FlowBox<T = any> {
   /**
    * alias for flatMap
    */
-  chain(fn) {
+  chain(fn: any) {
     return this.flatMap(fn);
   }
 
@@ -476,12 +485,12 @@ class FlowBox<T = any> {
     return this._thunkWithConfig(() => {
       const val = this.value;
       return [
-        (src) => ({ src, entries: toEntries(src) }),
-        (cxt) => ({
+        (src: any) => ({ src, entries: toEntries(src) }),
+        (cxt: any) => ({
           ...cxt,
           entries: cxt.entries.map(([k, v]) => [k, FlowBox._unboxDeep(v)]),
         }),
-        (cxt) => fromEntries(cxt.entries, cxt.src),
+        (cxt: any) => fromEntries(cxt.entries, cxt.src),
       ].reduce((v, fn) => {
         return this._resolve(v, fn);
       }, val);
@@ -510,15 +519,15 @@ class FlowBox<T = any> {
     return this._thunkWithConfig(() => {
       const val = this.value;
       return [
-        (src) => ({ src, entries: toEntries(src) }),
-        (cxt) => ({
+        (src: any) => ({ src, entries: toEntries(src) }),
+        (cxt: any) => ({
           ...cxt,
-          entries: cxt.entries.map(([k, v]) => [
+          entries: cxt.entries.map(([k, v]: any) => [
             k,
             FlowBox.isFlowBox(v) ? v : this._ofWithConfig(v),
           ]),
         }),
-        (cxt) => fromEntries(cxt.entries, cxt.src),
+        (cxt: any) => fromEntries(cxt.entries, cxt.src),
       ].reduce((v, fn) => {
         return this._resolve(v, fn);
       }, val);
@@ -659,13 +668,18 @@ class FlowBox<T = any> {
    * );
    * console.log(result); // "Ok: 42"
    */
-  fold<U>(onError, onNothing, onOk, onFinally): MaybePromise<U> {
-    let val;
+  fold<U>(
+    onError: (err: Error) => any,
+    onNothing: (nothing: BadValue) => any,
+    onOk: (v: T) => any,
+    onFinally: () => void
+  ) {
+    let val: T | BadValue;
     try {
       val = this.value;
       if (isPromise(val)) {
         return val
-          .then((v) => {
+          .then((v: T | BadValue) => {
             if (isError(v)) return onError(v);
             if (this._isBadValue(v)) return onNothing(v);
             return onOk(v);
@@ -710,7 +724,7 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => { throw new Error('fail'); });
    * const recovered = await asyncBox.catch(err => 'recovered').run(); // Promise resolving to "recovered"
    */
-  catch(fn) {
+  catch(fn: any) {
     return this._thunkWithConfig(() => {
       try {
         const val = this.value;
@@ -740,7 +754,7 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.thunk(async () => null);
    * const recovered = await asyncBox.recover(val => 'default').run(); // Promise resolving to "default"
    */
-  recover(fn) {
+  recover(fn: any) {
     return this._thunkWithConfig(() => {
       try {
         const val = this.value;
@@ -778,18 +792,19 @@ class FlowBox<T = any> {
     return this._thunkWithConfig(() => {
       const val = this.value;
       return [
-        (src) => ({ src, entries: toEntries(src) }),
-        (cxt) => ({
+        (src: any) => ({ src, entries: toEntries(src) }),
+        (cxt: any) => ({
           ...cxt,
           promises: Promise.all(cxt.entries.map(([_, v]) => v)),
         }),
-        (cxt) => ({
+        (cxt: any) => ({
           ...cxt,
-          results: cxt.promises.then((res) =>
+          results: cxt.promises.then((res: any[]) =>
             res.map((r, i) => [head(cxt.entries[i]), r])
           ),
         }),
-        (cxt) => cxt.results.then((entries) => fromEntries(entries, cxt.src)),
+        (cxt: any) =>
+          cxt.results.then((entries: any[]) => fromEntries(entries, cxt.src)),
       ].reduce((v, fn) => {
         return this._resolve(v, fn);
       }, val);
@@ -811,18 +826,19 @@ class FlowBox<T = any> {
     return this._thunkWithConfig(() => {
       const val = this.value;
       return [
-        (src) => ({ src, entries: toEntries(src) }),
-        (cxt) => ({
+        (src: any) => ({ src, entries: toEntries(src) as any[] }),
+        (cxt: any) => ({
           ...cxt,
-          promises: Promise.allSettled(cxt.entries.map(([_, v]) => v)),
+          promises: Promise.allSettled(cxt.entries.map(([_, v]: any) => v)),
         }),
-        (cxt) => ({
+        (cxt: any) => ({
           ...cxt,
-          results: cxt.promises.then((res) =>
+          results: cxt.promises.then((res: any[]) =>
             res.map((r, i) => [head(cxt.entries[i]), r])
           ),
         }),
-        (cxt) => cxt.results.then((entries) => fromEntries(entries, cxt.src)),
+        (cxt: any) =>
+          cxt.results.then((entries: any[]) => fromEntries(entries, cxt.src)),
       ].reduce((v, fn) => {
         return this._resolve(v, fn);
       }, val);
@@ -864,7 +880,7 @@ class FlowBox<T = any> {
    * const box = FlowBox.of(42);
    * box.tap(fb => console.log('Current value:', fb.run())).run();
    */
-  tap(fn) {
+  tap(fn: any) {
     return this._thunkWithConfig<T>(() => {
       const val = this.value;
       try {
