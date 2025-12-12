@@ -24,6 +24,18 @@ describe('FlowBox', () => {
       expect(typeof box._thunk).toBe('function');
       expect(box.run()).toBe(6);
     });
+
+    test('readme', () => {
+      const numberToDeclaration = FlowBox.of(5)
+        .map((x) => x + 1)
+        .map((x) => new Array(x).fill(null).map((n, i) => i))
+        .traverse((idx) => [idx, idx + 1])
+        .distribute()
+        .traverse((box) =>
+          box.map((arr) => `I have val ${arr[1]} at ${arr[0]} in a box`)
+        )
+        .sequence();
+    });
   });
 
   describe('FlowBox.map', () => {
@@ -228,15 +240,16 @@ describe('FlowBox', () => {
   });
 
   describe('FlowBox.traverse', () => {
-    test('It should apply a callback to an array of values, unpack any that are FlowBoxes, and return an array of results.', () => {
-      const box = FlowBox.of([1, 2, FlowBox.of(3)]);
+    test('It should apply a callback to an array of values, and return an array of results.', () => {
+      const box = FlowBox.of([1, 2, 3]);
       const res = box.traverse(addOne);
       expect(res.run()).toEqual([2, 3, 4]);
     });
 
     test('It should apply a callback to an array of values, apply the callback to any promises on the resolved values', async () => {
-      const box = FlowBox.of([1, 2, FlowBox.thunk(async () => 3)]);
+      const box = FlowBox.of([1, 2, Promise.resolve(3)]);
       const res = box.traverse(addOne);
+
       expect(await Promise.all(res.run())).toEqual([2, 3, 4]);
     });
 
@@ -262,7 +275,7 @@ describe('FlowBox', () => {
     test('if value is a promise, then it should call the function on the resolved value.', async () => {
       const box = FlowBox.thunk(async () => {
         await sleep();
-        return [1, 2, FlowBox.of(3)];
+        return [1, 2, 3];
       });
       const res = box.traverse(addOne);
       expect(await res.run()).toEqual([2, 3, 4]);
@@ -271,17 +284,17 @@ describe('FlowBox', () => {
     test('If any values in a collection resolve to a promise, it should call the callback on the resolved value of that promise.', async () => {
       const box = FlowBox.thunk(async () => {
         await sleep();
-        return [1, 2, FlowBox.of(Promise.resolve(3))];
-      });
-      const res = box.traverse(addOne);
-      const secondLvl = await res.run();
-      expect(await Promise.all(secondLvl)).toEqual([2, 3, 4]);
+        return [1, 2, Promise.resolve(3)];
+      }).traverse(addOne);
+
+      const res = await box.run();
+      expect(await Promise.all(res)).toEqual([2, 3, 4]);
     });
 
     test('If value is a promise, and if any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {
       const box = FlowBox.thunk(async () => {
         await sleep();
-        return [1, 2, FlowBox.of(Promise.resolve(null))];
+        return [1, 2, Promise.resolve(null)];
       });
       const fn = vi.fn();
       const traversed = box.traverse(fn);
@@ -290,9 +303,9 @@ describe('FlowBox', () => {
       expect(fn).toHaveBeenCalledTimes(2);
     });
 
-    test('If vaue is not a promise, and any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {
+    test('If value is not a promise, and any values resolve to a promise, it will not call the callback if that promise resolves to a bad value.', async () => {
       const box = FlowBox.thunk(() => {
-        return [1, 2, FlowBox.of(Promise.resolve(null))];
+        return [1, 2, Promise.resolve(null)];
       });
       const fn = vi.fn();
       const traversed = box.traverse(fn);
@@ -300,23 +313,56 @@ describe('FlowBox', () => {
       const all = await Promise.all(resProm);
       expect(fn).toHaveBeenCalledTimes(2);
     });
+
+    test('Respects data structure', async () => {
+      const addDawg = (str) => str + ' dawg!';
+      const objectBox = FlowBox.of({ a: 'hi', b: 'bye' });
+      const setBox = FlowBox.of(new Set(['hi', 'bye']));
+      const mapBox = FlowBox.of(
+        new Map([
+          ['a', 'hi'],
+          ['b', 'bye'],
+        ])
+      );
+      const arrayBox = FlowBox.of(['hi', 'bye']);
+      const scalarBox = FlowBox.of('hi');
+
+      expect(objectBox.traverse(addDawg).run()).toEqual({
+        a: 'hi dawg!',
+        b: 'bye dawg!',
+      });
+      const setRun = setBox.traverse(addDawg).run();
+      expect(setRun.has('hi dawg!')).toBeTruthy();
+      expect(setRun.has('bye dawg!')).toBeTruthy();
+
+      const mapRun = mapBox.traverse(addDawg).run();
+      expect(mapRun.get('a')).toBe('hi dawg!');
+      expect(mapRun.get('b')).toBe('bye dawg!');
+
+      expect(arrayBox.traverse(addDawg).run()).toEqual([
+        'hi dawg!',
+        'bye dawg!',
+      ]);
+
+      expect(scalarBox.traverse(addDawg).run()).toEqual('hi dawg!');
+    });
   });
 
   describe('FlowBox.toPromiseAll', () => {
     test('It should convert all promises into a promise.all', async () => {
       const box = FlowBox.of([1, 2, Promise.resolve(3)]);
-      const res = await box.toPromiseAll().run();
+      const res = await box.toResolvedAll().run();
       expect(res).toEqual([1, 2, 3]);
     });
 
     test('If the value is already a promise, it will wait for the promise to resolve and convert that result into a Promise.all', async () => {
       const box = FlowBox.thunk(async () => [1, 2, Promise.resolve(3)]);
-      const res = await box.toPromiseAll().run();
+      const res = await box.toResolvedAll().run();
       expect(res).toEqual([1, 2, 3]);
     });
     test('If the value is already a promise, it will wait for the promise to resolve and if not a bad value, convert that result into a Promise.all', async () => {
       const box = FlowBox.thunk(async () => null);
-      const res = await box.toPromiseAll().run();
+      const res = await box.toResolvedAll().run();
       // this means it's not an array, so the promise.all was not called.
       expect(res).toBeNull();
     });
@@ -329,7 +375,7 @@ describe('FlowBox', () => {
 
       box
         .sequence()
-        .peak((v) => {
+        .peek((v) => {
           expect(v).toEqual([1, 2, 3]);
         })
         .run();
@@ -341,7 +387,7 @@ describe('FlowBox', () => {
 
       box
         .sequence()
-        .peak((v) => {
+        .peek((v) => {
           expect(v).toEqual([1, 2, 3]);
         })
         .run();
@@ -351,7 +397,7 @@ describe('FlowBox', () => {
       const box = FlowBox.thunk(async () => [FlowBox.of(1), 2, FlowBox.of(3)]);
       const res = await box
         .sequence()
-        .peak(async (v) => {
+        .peek(async (v) => {
           const val = await v;
           expect(val).toEqual([1, 2, 3]);
         })
@@ -367,14 +413,14 @@ describe('FlowBox', () => {
       ]);
       const res = await box
         .sequence()
-        .peak(async (v) => {
+        .peek(async (v) => {
           const val = await v;
           expect(val[0]).toBe(1);
           expect(val[1]).toBe(2);
           expect(val[2]).toBeInstanceOf(Promise);
         })
-        .toPromiseAll()
-        .peak(async (v) => {
+        .toResolvedAll()
+        .peek(async (v) => {
           const val = await v;
           expect(val).toEqual([1, 2, 3]);
         })
@@ -402,7 +448,7 @@ describe('FlowBox', () => {
       expect(
         box
           .ap(valBox)
-          .peak((val) => {
+          .peek((val) => {
             expect(val).toBeNull();
           })
           .run()
@@ -416,7 +462,7 @@ describe('FlowBox', () => {
       expect(
         box
           .ap(valBox)
-          .peak((val) => {
+          .peek((val) => {
             expect(val).toBeNull();
           })
           .run()
@@ -473,13 +519,13 @@ describe('FlowBox', () => {
         .map((x) => {
           throw new Error('nah');
         })
-        .peak((val) => {
+        .peek((val) => {
           expect(val).toBeInstanceOf(Error);
         })
         .catch((e) => {
           return 2;
         })
-        .peak((val) => {
+        .peek((val) => {
           expect(val).toBe(2);
         })
         .run();
@@ -492,7 +538,7 @@ describe('FlowBox', () => {
         .map((x) => {
           throw new Error('nah');
         })
-        .peak((val) => {
+        .peek((val) => {
           expect(val).toBeInstanceOf(Promise);
         })
         .map(mockFn)
@@ -564,34 +610,34 @@ describe('FlowBox', () => {
       const getIdsBox = FlowBox.of(getUserIds);
       const res = await getIdsBox
         .map((fn) => fn())
-        .peak((v) => {
+        .peek((v) => {
           expect(v).toBeInstanceOf(Promise);
         })
         .traverse((id) => async () => getUser(id))
-        // .peak(async (v) => {
+        // .peek(async (v) => {
         //   const val = await v;
         //   console.log('traversed', val);
         //   expect(val.length).toBe(3);
         //   val.forEach((fn) => expect(fn).toBeInstanceOf(Function));
         // })
         .distribute()
-        // .peak(async (v) => {
+        // .peek(async (v) => {
         //   const val = await v;
         //   console.log('distributed', val);
         //   val.forEach((fb) => expect(FlowBox.isFlowBox(fb)).toBeTruthy());
         // })
         .sequence()
-        // .peak(async (v) => {
+        // .peek(async (v) => {
         //   const val = await v;
         //   console.log('sequenced', val);
         //   val.forEach((fb) => expect(FlowBox.isFlowBox(fb)).not.toBeTruthy());
         // })
         .traverse((fn) => fn())
-        // .peak(async (v) => {
+        // .peek(async (v) => {
         //   const val = await v;
         //   console.log('invoked', val);
         // })
-        .toPromiseAll()
+        .toResolvedAll()
         .map(async (users) => {
           await getUserIds();
           return users.map((user) => ({
