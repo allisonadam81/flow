@@ -4,13 +4,19 @@
   "description": "A functional programming monad container that abstracts away async management, try/catch, and maybe/either/task monad concepts.",
   "license": "MIT",
   "type": "module",
-  "main": "index.js",
+  "main": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "scripts": {
     "build": "tsdown",
     "test": "vitest"
   },
   "devDependencies": {
-    "tsdown": "^0.16.6",
+    "tsdown": "^0.17.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.12"
   }
