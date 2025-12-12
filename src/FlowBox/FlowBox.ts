@@ -1,11 +1,13 @@
 import {
+  fromEntries,
+  toEntries,
   identity,
   invoke,
   isError,
   isFunction,
   isPromise,
-  map,
   toValues,
+  head,
 } from '../utils';
 
 type BadValuePredicate = (v: any) => boolean;
@@ -13,9 +15,6 @@ type BadValue = any | BadValuePredicate;
 type Thunk<T> = () => T;
 
 type MaybePromise<T> = T | Promise<T>;
-
-type Unbox<T> =
-  T extends FlowBox<infer U> ? U : T extends Promise<infer U> ? U : T;
 
 type FlowBoxConfig = {
   badValues: BadValue[];
@@ -121,15 +120,15 @@ class FlowBox<T = any> {
     return v instanceof FlowBox;
   }
 
-  private static _unpack(v: any) {
+  private static _unbox(v: any) {
     if (FlowBox.isFlowBox(v)) return v.value;
-    if (isPromise(v)) return v.then(FlowBox._unpack);
+    if (isPromise(v)) return v.then(FlowBox._unbox);
     return v;
   }
 
-  private static _unpackDeep(v: any) {
-    if (FlowBox.isFlowBox(v)) return FlowBox._unpackDeep(v.value);
-    if (isPromise(v)) return v.then(FlowBox._unpackDeep);
+  private static _unboxDeep(v: any) {
+    if (FlowBox.isFlowBox(v)) return FlowBox._unboxDeep(v.value);
+    if (isPromise(v)) return v.then(FlowBox._unboxDeep);
     return v;
   }
 
@@ -300,7 +299,7 @@ class FlowBox<T = any> {
   }
 
   /**
-   * Passes the value to a function that can return a FlowBox, and unpacks the result. Unpacks only one layer deep.
+   * Passes a resolved value to a function that can return a FlowBox, and unboxes the resolved result. Unboxes only one layer deep.
    * If your function does not return a FlowBox, it will return the value instead.
    *
    * It allows chaining multiple FlowBox-producing operations in a single pipeline while propagating errors,
@@ -321,13 +320,13 @@ class FlowBox<T = any> {
   flatMap(fn) {
     return this._thunkWithConfig(() => {
       return this._resolve(this.value, (v) =>
-        this._resolve(fn(v), FlowBox._unpack)
+        this._resolve(fn(v), FlowBox._unbox)
       );
     });
   }
 
   /**
-   * Flattens a nested FlowBox or a promise of FlowBox.
+   * Flattens a nested FlowBox or a promise that resolves to a FlowBox.
    *
    * If the FlowBox contains another FlowBox (or a promise resolving to a FlowBox),
    * `flat` unwraps it so that the resulting FlowBox contains the inner value directly.
@@ -344,16 +343,25 @@ class FlowBox<T = any> {
    */
   flat() {
     return this._thunkWithConfig(() => {
-      return this._resolve(this.value, FlowBox._unpack);
+      return this._resolve(this.value, FlowBox._unbox);
+    });
+  }
+  /**
+   * Recursively flattens FlowBoxes or promises that resolve to FlowBoxes until a value is reached.
+   * @returns {FlowBox<Unbox<T>>} A new FlowBox with the inner value recursively flattened.
+   */
+  flattenDeep() {
+    return this._thunkWithConfig(() => {
+      return this._resolve(this.value, FlowBox._unboxDeep);
     }) as any;
   }
 
   /**
-   * Applies a function contained in a FlowBox to a value contained in another FlowBox (or a plain value).
+   * Applies a resolved value that is a function to a value contained in another FlowBox's resolved value, or a plain resolved value..
    *
    * This is the applicative functor pattern. The first FlowBox should contain a function, which
    * will be applied to the value of the second FlowBox. Promises and bad values are handled automatically in either box.
-   * If either value is "bad", that value will be returned. If the first box does not contained a function, that value will be returned.
+   * If either resolved value is "bad", that resolved value will be returned. If the first box does not resolve to a function, that resolved value will be returned.
    *
    * @param {MaybePromise<FlowBox<any> | any>} fb - A FlowBox or value containing the argument to apply the function to.
    * @returns {FlowBox<MaybePromise<any>>} A new FlowBox containing the result of the function application.
@@ -372,15 +380,16 @@ class FlowBox<T = any> {
     return this._thunkWithConfig(() => {
       return this._resolve(this.value, (faResolved) => {
         if (!isFunction(faResolved)) return faResolved;
-        return this._resolve(FlowBox._unpack(fb), faResolved);
+        return this._resolve(FlowBox._unbox(fb), faResolved);
       });
     });
   }
 
   /**
-   * Turns a FlowBox value into an array through `toValues` and applies a function to each element.
-   *
-   * The function can return a promise, or a plain value.,
+   * Iterates over a resolved collection of values, deeply unboxes them,
+   * and calls the callback on each resolved value in the collection, then deeply unboxes those results.
+   * Respects the original shape of the collection.
+   * If the original resolved value is not a supported collection, it will be coerced into an array.
    *
    * @template U The type of values returned by the callback function.
    * @param {(val: any) => FlowBox<U> | Promise<U> | U} fn - A function to apply to each element of the collection.
@@ -392,22 +401,44 @@ class FlowBox<T = any> {
    * const box = FlowBox.of([1, 2, 3]);
    * const result = box.traverse(x => FlowBox.of(x + 1)).run(); // [2, 3, 4]
    *
-   * // Works with async callbacks
+   * Works with async callbacks
    * const asyncBox = FlowBox.of([1, 2, 3]);
    * const result = await asyncBox.traverse(async x => x + 1).run(); // An array of promises that will resolve to [2, 3, 4]
    *
-   * // Deeply unpacks nested FlowBoxes returned by the callback
+   * Deeply unboxes nested FlowBoxes returned by the callback
    * const nestedBox = FlowBox.of([FlowBox.of(1), FlowBox.of(2)]);
    * const result = await nestedBox.traverse(x => FlowBox.of(x.run())).run(); // [1, 2]
+   *
+   * Respects original data structure
+   * const mapBox = FlowBox.of(new Map([['1', 'bye'], ['2', 'no']]))
+   * const result = mapBox.traverse(addExclamation).run()
+   * Map([['1', 'bye!'], ['2', 'no!']])
+   *
    */
   traverse(fn) {
     return this._thunkWithConfig(() => {
       const val = this.value;
       return [
-        toValues,
-        map((el) => FlowBox._unpackDeep(el)),
-        map((el) => this._resolve(el, fn)),
-        map((el) => FlowBox._unpackDeep(el)),
+        FlowBox._unboxDeep,
+        (src) => ({ src, entries: toEntries(src) }),
+        (cxt) => ({
+          ...cxt,
+          entries: cxt.entries.map(([k, v]) => [k, FlowBox._unboxDeep(v)]),
+        }),
+        (cxt) => {
+          return {
+            ...cxt,
+            entries: cxt.entries.map(([k, v]) => [
+              k,
+              this._resolve(v, (v) => fn(v, k, cxt.src)),
+            ]),
+          };
+        },
+        (cxt) => ({
+          ...cxt,
+          entries: cxt.entries.map(([k, v]) => [k, FlowBox._unboxDeep(v)]),
+        }),
+        (cxt) => fromEntries(cxt.entries, cxt.src),
       ].reduce((v, func) => {
         return this._resolve(v, func);
       }, val);
@@ -421,11 +452,11 @@ class FlowBox<T = any> {
   }
 
   /**
-   * Calls `toValues` on the FlowBox value, and converts into a FlowBox
-   * containing an array of fully resolved values.
    *
-   * Each element of the collection is deeply unpacked, so nested FlowBoxes or promises are automatically resolved.
-   * Unlike `traverse`, `sequence` does not apply a function; it simply resolves the contents of the collection.
+   * Iterates over a resolved collection of values, and deeply unboxes them.
+   * Respects the original shape of the collection.
+   * If the original resolved value is not a supported collection, it will be coerced into an array.
+
    *
    * @returns {FlowBox<MaybePromise<Unbox<T>[]>>} A FlowBox containing an array of resolved values.
    * @note If your results are now an array of promises and you want them to resolve together, consider calling `toPromiseAll` or `toPromiseAllSettled`.
@@ -443,21 +474,24 @@ class FlowBox<T = any> {
    */
   sequence() {
     return this._thunkWithConfig(() => {
-      return [toValues, map((el) => FlowBox._unpackDeep(el))].reduce(
-        (v, fn) => {
-          return this._resolve(v, fn);
-        },
-        this.value
-      );
+      const val = this.value;
+      return [
+        (src) => ({ src, entries: toEntries(src) }),
+        (cxt) => ({
+          ...cxt,
+          entries: cxt.entries.map(([k, v]) => [k, FlowBox._unboxDeep(v)]),
+        }),
+        (cxt) => fromEntries(cxt.entries, cxt.src),
+      ].reduce((v, fn) => {
+        return this._resolve(v, fn);
+      }, val);
     });
   }
 
   /**
-   * Calls `toValues` on a FlowBox value, and converts all elements in the array to a FlowBox.
-   * If the element in the array is already a FlowBox, it will not nest them.
-   *
-   * The returned FlowBox contains an array of FlowBoxes, and each element can be a promise
-   * if the original values are asynchronous.
+   * Iterates over a resolved collection of values, and packs those resolved values into a FlowBox if they are not already.
+   * Respects the original shape of the collection.
+   * If the original resolved value is not a supported collection, it will be coerced into an array.
    *
    * @returns {FlowBox<MaybePromise<FlowBox<Unbox<T>>[]>>} A FlowBox containing an array of FlowBoxes.
    *
@@ -474,12 +508,20 @@ class FlowBox<T = any> {
    */
   distribute() {
     return this._thunkWithConfig(() => {
+      const val = this.value;
       return [
-        toValues,
-        map((el) => (FlowBox.isFlowBox(el) ? el : this._ofWithConfig(el))),
+        (src) => ({ src, entries: toEntries(src) }),
+        (cxt) => ({
+          ...cxt,
+          entries: cxt.entries.map(([k, v]) => [
+            k,
+            FlowBox.isFlowBox(v) ? v : this._ofWithConfig(v),
+          ]),
+        }),
+        (cxt) => fromEntries(cxt.entries, cxt.src),
       ].reduce((v, fn) => {
         return this._resolve(v, fn);
-      }, this.value);
+      }, val);
     });
   }
 
@@ -490,7 +532,7 @@ class FlowBox<T = any> {
    *
    * If the value is a promise, the promise is returned. If an error is thrown
    * during evaluation, the error is returned instead of being thrown.
-   * If the promise rejects, it is not caught.
+   * If the promise rejects, the rejected value is returned.
    *
    * @returns {T | Promise<T> | unknown} The value contained in the FlowBox, a promise resolving to the value,
    * or an error if one occurred.
@@ -504,7 +546,9 @@ class FlowBox<T = any> {
    */
   run() {
     try {
-      return this.value;
+      const val = this.value;
+      if (isPromise(val)) return val.catch(identity);
+      return val;
     } catch (err) {
       return err;
     }
@@ -540,7 +584,7 @@ class FlowBox<T = any> {
   }
 
   /**
-   * Wraps the evaluated value of the FlowBox into a new FlowBox.
+   * Runs all parts of the pipeline before it, and puts the value in a FlowBox.
    *
    * This is useful for reintroducing a value (or error) back into a FlowBox
    * chain for further processing. If the evaluation throws, the error is captured
@@ -716,8 +760,7 @@ class FlowBox<T = any> {
   }
 
   /**
-   * Calls `toValues` on a FlowBox value, and turns it into a Promise resolving
-   * to an array of resolved values, calling Promise.all.
+   * Converts a resolved collection of values into a single promise (via Promise.all) that, once resolved, will place all values back into the original shape of the collection by key.
    *
    * Useful when the FlowBox contains an array of values or FlowBoxes/promises, such as after a traverse.
    *
@@ -730,15 +773,31 @@ class FlowBox<T = any> {
    * const asyncBox = FlowBox.of([Promise.resolve(1), Promise.resolve(2)]);
    * const result = await asyncBox.toPromiseAll().run(); // [1, 2]
    */
-  toPromiseAll() {
+
+  toResolvedAll() {
     return this._thunkWithConfig(() => {
-      return this._resolve(this.value, (v) => Promise.all(toValues(v)));
+      const val = this.value;
+      return [
+        (src) => ({ src, entries: toEntries(src) }),
+        (cxt) => ({
+          ...cxt,
+          promises: Promise.all(cxt.entries.map(([_, v]) => v)),
+        }),
+        (cxt) => ({
+          ...cxt,
+          results: cxt.promises.then((res) =>
+            res.map((r, i) => [head(cxt.entries[i]), r])
+          ),
+        }),
+        (cxt) => cxt.results.then((entries) => fromEntries(entries, cxt.src)),
+      ].reduce((v, fn) => {
+        return this._resolve(v, fn);
+      }, val);
     });
   }
 
   /**
-   * Calls `toValues` on a FlowBox value, and turns it into a Promise resolving
-   * to an array of settled values, calling Promise.allSettled.
+   * Converts a resolved collection of values into a single promise (via Promise.allSettled) that, once resolved, will place all values back into the original shape of the collection by key.
    *
    * Each element is wrapped in `{ status: "fulfilled" | "rejected", value | reason }`.
    *
@@ -748,9 +807,25 @@ class FlowBox<T = any> {
    * const box = FlowBox.of([Promise.resolve(1), Promise.reject('fail')]);
    * const result = await box.toPromiseAllSettled().run(); // [{status: "fulfilled", value: 1}, {status: "rejected", reason: "fail"}]
    */
-  toPromiseAllSettled() {
+  toResolvedAllSettled() {
     return this._thunkWithConfig(() => {
-      return this._resolve(this.value, (v) => Promise.allSettled(toValues(v)));
+      const val = this.value;
+      return [
+        (src) => ({ src, entries: toEntries(src) }),
+        (cxt) => ({
+          ...cxt,
+          promises: Promise.allSettled(cxt.entries.map(([_, v]) => v)),
+        }),
+        (cxt) => ({
+          ...cxt,
+          results: cxt.promises.then((res) =>
+            res.map((r, i) => [head(cxt.entries[i]), r])
+          ),
+        }),
+        (cxt) => cxt.results.then((entries) => fromEntries(entries, cxt.src)),
+      ].reduce((v, fn) => {
+        return this._resolve(v, fn);
+      }, val);
     });
   }
 
@@ -809,9 +884,9 @@ class FlowBox<T = any> {
    *
    * @example
    * const box = FlowBox.of(42);
-   * box.peak((val, config) => console.log('Value:', val, 'Config:', config)).run(); // logs 'Value: 42', 'Config: config'
+   * box.peek((val, config) => console.log('Value:', val, 'Config:', config)).run(); // logs 'Value: 42', 'Config: config'
    */
-  peak(fn: (val: any, config: FlowBoxConfig) => void) {
+  peek(fn: (val: any, config: FlowBoxConfig) => void) {
     return this._thunkWithConfig<T>(() => {
       const val = this.value;
       try {
